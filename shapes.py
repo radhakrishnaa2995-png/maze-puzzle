@@ -17,19 +17,14 @@ class ShapeTemplate:
 
 
 def _circle(cx: float, cy: float, r: float) -> MaskFn:
-    def fn(x: float, y: float) -> bool:
-        dx, dy = x - cx, y - cy
-        return (dx * dx) + (dy * dy) <= r * r
-
-    return fn
+    return lambda x, y: (x - cx) ** 2 + (y - cy) ** 2 <= r * r
 
 
 def _ellipse(cx: float, cy: float, rx: float, ry: float, rot: float = 0.0) -> MaskFn:
     c, s = math.cos(rot), math.sin(rot)
 
     def fn(x: float, y: float) -> bool:
-        tx = x - cx
-        ty = y - cy
+        tx, ty = x - cx, y - cy
         xr = tx * c + ty * s
         yr = -tx * s + ty * c
         return (xr * xr) / (rx * rx + 1e-9) + (yr * yr) / (ry * ry + 1e-9) <= 1
@@ -38,10 +33,7 @@ def _ellipse(cx: float, cy: float, rx: float, ry: float, rot: float = 0.0) -> Ma
 
 
 def _rect(cx: float, cy: float, w: float, h: float) -> MaskFn:
-    def fn(x: float, y: float) -> bool:
-        return abs(x - cx) <= w / 2 and abs(y - cy) <= h / 2
-
-    return fn
+    return lambda x, y: abs(x - cx) <= w / 2 and abs(y - cy) <= h / 2
 
 
 def _polygon(points: list[tuple[float, float]]) -> MaskFn:
@@ -61,11 +53,11 @@ def _polygon(points: list[tuple[float, float]]) -> MaskFn:
 
 
 def _star(cx: float, cy: float, r_outer: float, r_inner: float) -> MaskFn:
-    pts: list[tuple[float, float]] = []
+    pts = []
     for i in range(10):
-        angle = -math.pi / 2 + i * math.pi / 5
+        a = -math.pi / 2 + i * math.pi / 5
         r = r_outer if i % 2 == 0 else r_inner
-        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
     return _polygon(pts)
 
 
@@ -73,242 +65,130 @@ def _heart(scale: float = 1.0, shift_y: float = 0.02) -> MaskFn:
     def fn(x: float, y: float) -> bool:
         sx = x / max(0.1, scale)
         sy = (y - shift_y) / max(0.1, scale)
-        value = (sx * sx + sy * sy - 1) ** 3 - sx * sx * sy**3
-        return value <= 0 and sy <= 1.05
+        return (sx * sx + sy * sy - 1) ** 3 - sx * sx * sy**3 <= 0 and sy <= 1.05
 
     return fn
 
 
 def _union(parts: Iterable[MaskFn]) -> MaskFn:
     parts = list(parts)
-
-    def fn(x: float, y: float) -> bool:
-        return any(p(x, y) for p in parts)
-
-    return fn
-
-
-def _subtract(base: MaskFn, holes: Iterable[MaskFn]) -> MaskFn:
-    holes = list(holes)
-
-    def fn(x: float, y: float) -> bool:
-        return base(x, y) and not any(h(x, y) for h in holes)
-
-    return fn
+    return lambda x, y: any(p(x, y) for p in parts)
 
 
 def _build_templates(rng: random.Random) -> List[ShapeTemplate]:
-    j = lambda s=0.04: rng.uniform(-s, s)
-
+    j = lambda s=0.03: rng.uniform(-s, s)
     templates: List[ShapeTemplate] = []
 
-    # Dinosaur
-    dinosaur = _union(
+    # Dinosaur (triceratops-like profile)
+    dino_outline = _polygon(
         [
-            _ellipse(-0.05, -0.02, 0.55 + j(0.03), 0.34 + j(0.03)),
-            _rect(0.38, 0.18, 0.24, 0.22),
-            _circle(0.50, 0.28, 0.16),
-            _polygon([(-0.62, -0.02), (-0.92, 0.10), (-0.80, -0.18)]),
-            _rect(-0.22, -0.46, 0.16, 0.26),
-            _rect(0.10, -0.45, 0.16, 0.26),
+            (-0.95, 0.15), (-0.82, 0.26), (-0.66, 0.24), (-0.54, 0.38), (-0.30, 0.44),
+            (-0.05, 0.48), (0.24, 0.42), (0.48, 0.28), (0.64, 0.16), (0.88, 0.08),
+            (0.96, -0.02), (0.82, -0.08), (0.56, -0.12), (0.52, -0.32), (0.40, -0.52),
+            (0.20, -0.50), (0.14, -0.24), (-0.10, -0.24), (-0.16, -0.54), (-0.34, -0.54),
+            (-0.44, -0.30), (-0.62, -0.20), (-0.84, -0.10), (-0.96, 0.02),
         ]
     )
-    templates.append(ShapeTemplate("Dinosaur", dinosaur))
+    horn = _polygon([(-0.94, 0.24), (-1.02, 0.34), (-0.90, 0.33)])
+    templates.append(ShapeTemplate("Dinosaur", _union([dino_outline, horn])))
 
-    # Rocket
-    rocket = _union(
-        [
-            _ellipse(0.0, 0.02, 0.30 + j(0.02), 0.62 + j(0.04)),
-            _polygon([(0.0, 0.94), (-0.18, 0.56), (0.18, 0.56)]),
-            _polygon([(-0.30, -0.16), (-0.54, -0.38), (-0.16, -0.34)]),
-            _polygon([(0.30, -0.16), (0.54, -0.38), (0.16, -0.34)]),
-            _polygon([(-0.10, -0.60), (0.10, -0.60), (0.0, -0.92)]),
-        ]
-    )
+    rocket = _union([
+        _ellipse(0.0, 0.02, 0.33 + j(0.02), 0.70 + j(0.03)),
+        _polygon([(0.0, 0.98), (-0.20, 0.58), (0.20, 0.58)]),
+        _polygon([(-0.32, -0.14), (-0.60, -0.42), (-0.18, -0.36)]),
+        _polygon([(0.32, -0.14), (0.60, -0.42), (0.18, -0.36)]),
+        _polygon([(-0.10, -0.66), (0.10, -0.66), (0.0, -0.98)]),
+    ])
     templates.append(ShapeTemplate("Rocket", rocket))
 
-    # Animal (cat-like)
-    animal = _union(
-        [
-            _ellipse(-0.08, -0.05, 0.52, 0.30),
-            _circle(0.38, 0.18, 0.20),
-            _polygon([(0.26, 0.30), (0.34, 0.54), (0.44, 0.32)]),
-            _polygon([(0.44, 0.32), (0.56, 0.54), (0.56, 0.30)]),
-            _rect(-0.28, -0.45, 0.14, 0.28),
-            _rect(-0.02, -0.45, 0.14, 0.28),
-            _rect(0.22, -0.45, 0.14, 0.28),
-            _ellipse(-0.56, 0.20, 0.26, 0.08, rot=0.8),
-        ]
-    )
+    animal = _union([
+        _ellipse(-0.06, -0.04, 0.56, 0.31), _circle(0.40, 0.16, 0.19),
+        _polygon([(0.28, 0.28), (0.36, 0.54), (0.46, 0.30)]),
+        _polygon([(0.44, 0.30), (0.58, 0.54), (0.58, 0.28)]),
+        _rect(-0.30, -0.46, 0.14, 0.30), _rect(-0.02, -0.46, 0.14, 0.30), _rect(0.24, -0.46, 0.14, 0.30),
+        _ellipse(-0.58, 0.18, 0.28, 0.08, rot=0.8),
+    ])
     templates.append(ShapeTemplate("Animal", animal))
 
-    # Butterfly
-    butterfly = _union(
-        [
-            _ellipse(-0.34, 0.20, 0.32, 0.28),
-            _ellipse(0.34, 0.20, 0.32, 0.28),
-            _ellipse(-0.28, -0.28, 0.34, 0.24),
-            _ellipse(0.28, -0.28, 0.34, 0.24),
-            _rect(0.0, -0.02, 0.16, 0.72),
-        ]
-    )
-    templates.append(ShapeTemplate("Butterfly", butterfly))
+    templates.append(ShapeTemplate("Butterfly", _union([
+        _ellipse(-0.35, 0.22, 0.33, 0.30), _ellipse(0.35, 0.22, 0.33, 0.30),
+        _ellipse(-0.30, -0.30, 0.35, 0.25), _ellipse(0.30, -0.30, 0.35, 0.25),
+        _rect(0.0, -0.02, 0.16, 0.76),
+    ])))
 
-    # Fish
-    fish = _union(
-        [
-            _ellipse(-0.08, -0.02, 0.58, 0.34),
-            _polygon([(0.46, 0.0), (0.90, 0.30), (0.90, -0.30)]),
-            _polygon([(-0.10, 0.33), (0.12, 0.62), (0.18, 0.28)]),
-        ]
-    )
-    templates.append(ShapeTemplate("Fish", fish))
+    templates.append(ShapeTemplate("Fish", _union([
+        _ellipse(-0.10, -0.02, 0.62, 0.36), _polygon([(0.48, 0.0), (0.96, 0.34), (0.96, -0.34)]),
+        _polygon([(-0.12, 0.34), (0.14, 0.66), (0.22, 0.30)]),
+    ])))
 
-    # Car
-    car = _union(
-        [
-            _rect(0.0, -0.18, 1.40, 0.44),
-            _polygon([(-0.56, 0.04), (-0.26, 0.34), (0.34, 0.34), (0.60, 0.04)]),
-            _circle(-0.42, -0.36, 0.20),
-            _circle(0.42, -0.36, 0.20),
-        ]
-    )
-    templates.append(ShapeTemplate("Car", car))
-
-    # Train
-    train = _union(
-        [
-            _rect(-0.12, -0.12, 1.42, 0.44),
-            _rect(0.44, 0.14, 0.42, 0.34),
-            _rect(0.58, 0.42, 0.16, 0.20),
-            _circle(-0.56, -0.38, 0.16),
-            _circle(-0.12, -0.38, 0.16),
-            _circle(0.34, -0.38, 0.16),
-        ]
-    )
+    train = _union([
+        _rect(-0.08, -0.08, 1.60, 0.50),
+        _rect(0.52, 0.18, 0.42, 0.34),
+        _rect(0.64, 0.44, 0.16, 0.20),
+        _circle(-0.62, -0.38, 0.17), _circle(-0.20, -0.38, 0.17), _circle(0.24, -0.38, 0.17), _circle(0.66, -0.38, 0.17),
+    ])
     templates.append(ShapeTemplate("Train", train))
 
-    # Castle
-    castle = _union(
-        [
-            _rect(0.0, -0.05, 1.32, 0.74),
-            _rect(-0.52, 0.34, 0.30, 0.46),
-            _rect(0.52, 0.34, 0.30, 0.46),
-            _rect(-0.25, 0.42, 0.14, 0.16),
-            _rect(0.0, 0.42, 0.14, 0.16),
-            _rect(0.25, 0.42, 0.14, 0.16),
-        ]
-    )
+    car = _union([
+        _rect(0.0, -0.16, 1.46, 0.46),
+        _polygon([(-0.58, 0.04), (-0.24, 0.34), (0.34, 0.34), (0.62, 0.04)]),
+        _circle(-0.44, -0.36, 0.20), _circle(0.44, -0.36, 0.20),
+    ])
+    templates.append(ShapeTemplate("Car", car))
+
+    castle = _union([
+        _rect(0.0, -0.06, 1.36, 0.76), _rect(-0.54, 0.34, 0.30, 0.48), _rect(0.54, 0.34, 0.30, 0.48),
+        _rect(-0.26, 0.44, 0.14, 0.16), _rect(0.0, 0.44, 0.14, 0.16), _rect(0.26, 0.44, 0.14, 0.16),
+    ])
     templates.append(ShapeTemplate("Castle", castle))
 
-    # Tree
-    tree = _union(
-        [
-            _rect(0.0, -0.52, 0.26, 0.56),
-            _circle(0.0, 0.12, 0.42),
-            _circle(-0.30, 0.04, 0.28),
-            _circle(0.30, 0.04, 0.28),
-            _circle(0.0, 0.40, 0.26),
-        ]
-    )
-    templates.append(ShapeTemplate("Tree", tree))
+    templates.append(ShapeTemplate("Tree", _union([
+        _rect(0.0, -0.56, 0.28, 0.60), _circle(0.0, 0.14, 0.45), _circle(-0.32, 0.04, 0.30), _circle(0.32, 0.04, 0.30), _circle(0.0, 0.42, 0.28),
+    ])))
 
-    # Flower
-    flower = _union(
-        [
-            _circle(0.0, 0.08, 0.22),
-            _circle(0.0, 0.46, 0.21),
-            _circle(0.0, -0.30, 0.21),
-            _circle(-0.38, 0.08, 0.21),
-            _circle(0.38, 0.08, 0.21),
-            _circle(-0.28, 0.34, 0.20),
-            _circle(0.28, 0.34, 0.20),
-            _rect(0.0, -0.62, 0.11, 0.44),
-        ]
-    )
-    templates.append(ShapeTemplate("Flower", flower))
+    templates.append(ShapeTemplate("Flower", _union([
+        _circle(0.0, 0.10, 0.24), _circle(0.0, 0.50, 0.22), _circle(0.0, -0.30, 0.22),
+        _circle(-0.40, 0.10, 0.22), _circle(0.40, 0.10, 0.22), _circle(-0.30, 0.36, 0.20), _circle(0.30, 0.36, 0.20),
+        _rect(0.0, -0.64, 0.12, 0.46),
+    ])))
 
-    # Ice Cream
-    ice_cream = _union(
-        [
-            _circle(-0.18, 0.34, 0.25),
-            _circle(0.16, 0.34, 0.25),
-            _circle(0.0, 0.50, 0.25),
-            _polygon([(-0.28, 0.14), (0.28, 0.14), (0.0, -0.88)]),
-        ]
-    )
-    templates.append(ShapeTemplate("Ice Cream", ice_cream))
+    templates.append(ShapeTemplate("Ice Cream", _union([
+        _circle(-0.20, 0.34, 0.27), _circle(0.20, 0.34, 0.27), _circle(0.0, 0.52, 0.26), _polygon([(-0.30, 0.14), (0.30, 0.14), (0.0, -0.92)]),
+    ])))
 
-    # Balloon
-    balloon = _union(
-        [
-            _ellipse(0.0, 0.18, 0.42, 0.54),
-            _polygon([(-0.08, -0.28), (0.08, -0.28), (0.0, -0.44)]),
-            _rect(0.0, -0.64, 0.05, 0.34),
-        ]
-    )
-    templates.append(ShapeTemplate("Balloon", balloon))
+    templates.append(ShapeTemplate("Balloon", _union([
+        _ellipse(0.0, 0.20, 0.44, 0.56), _polygon([(-0.08, -0.30), (0.08, -0.30), (0.0, -0.46)]), _rect(0.0, -0.66, 0.05, 0.34),
+    ])))
 
-    templates.append(ShapeTemplate("Star", _star(0.0, 0.02, 0.88, 0.36)))
-    templates.append(ShapeTemplate("Heart", _heart(0.95, 0.05)))
+    templates.append(ShapeTemplate("Star", _star(0.0, 0.04, 0.92, 0.38)))
+    templates.append(ShapeTemplate("Heart", _heart(0.98, 0.05)))
 
-    # Robot
-    robot = _union(
-        [
-            _rect(0.0, 0.36, 0.48, 0.34),
-            _rect(0.0, -0.06, 0.78, 0.56),
-            _rect(-0.54, -0.04, 0.20, 0.40),
-            _rect(0.54, -0.04, 0.20, 0.40),
-            _rect(-0.18, -0.62, 0.18, 0.34),
-            _rect(0.18, -0.62, 0.18, 0.34),
-            _rect(0.0, 0.62, 0.06, 0.14),
-            _circle(0.0, 0.72, 0.06),
-        ]
-    )
+    robot = _union([
+        _rect(0.0, 0.40, 0.56, 0.34),
+        _rect(0.0, -0.04, 0.92, 0.60),
+        _rect(-0.62, -0.06, 0.22, 0.42), _rect(0.62, -0.06, 0.22, 0.42),
+        _rect(-0.20, -0.70, 0.20, 0.34), _rect(0.20, -0.70, 0.20, 0.34),
+        _rect(0.0, 0.66, 0.06, 0.12), _circle(0.0, 0.75, 0.06),
+    ])
     templates.append(ShapeTemplate("Robot", robot))
 
-    # Cloud
-    cloud = _union(
-        [
-            _circle(-0.38, 0.02, 0.24),
-            _circle(-0.12, 0.18, 0.28),
-            _circle(0.18, 0.14, 0.26),
-            _circle(0.44, 0.02, 0.20),
-            _rect(0.0, -0.10, 1.02, 0.28),
-        ]
-    )
-    templates.append(ShapeTemplate("Cloud", cloud))
+    templates.append(ShapeTemplate("Cloud", _union([
+        _circle(-0.40, 0.04, 0.25), _circle(-0.14, 0.20, 0.30), _circle(0.18, 0.16, 0.28), _circle(0.46, 0.04, 0.22), _rect(0.0, -0.12, 1.10, 0.30),
+    ])))
 
-    # Planet
-    ring_band = _ellipse(0.0, -0.02, 0.82, 0.26, rot=-0.25)
-    planet = _union([_circle(0.0, 0.0, 0.46), ring_band])
-    templates.append(ShapeTemplate("Planet", planet))
+    templates.append(ShapeTemplate("Planet", _union([_circle(0.0, 0.02, 0.48), _ellipse(0.0, -0.02, 0.88, 0.28, rot=-0.25)])))
 
-    # Bird
-    bird = _union(
-        [
-            _ellipse(-0.06, 0.00, 0.46, 0.30),
-            _circle(0.36, 0.18, 0.14),
-            _polygon([(0.50, 0.16), (0.78, 0.24), (0.50, 0.02)]),
-            _ellipse(-0.22, 0.10, 0.28, 0.18, rot=-0.45),
-            _rect(0.00, -0.42, 0.06, 0.22),
-        ]
-    )
-    templates.append(ShapeTemplate("Bird", bird))
+    templates.append(ShapeTemplate("Bird", _union([
+        _ellipse(-0.08, 0.00, 0.50, 0.32), _circle(0.38, 0.18, 0.14), _polygon([(0.52, 0.16), (0.84, 0.24), (0.52, 0.02)]),
+        _ellipse(-0.24, 0.10, 0.30, 0.19, rot=-0.45), _rect(0.00, -0.44, 0.06, 0.24),
+    ])))
 
-    # Teddy Bear
-    teddy = _union(
-        [
-            _circle(-0.20, 0.46, 0.12),
-            _circle(0.20, 0.46, 0.12),
-            _circle(0.0, 0.28, 0.26),
-            _ellipse(0.0, -0.12, 0.36, 0.34),
-            _circle(-0.34, -0.06, 0.14),
-            _circle(0.34, -0.06, 0.14),
-            _circle(-0.16, -0.46, 0.14),
-            _circle(0.16, -0.46, 0.14),
-        ]
-    )
+    teddy = _union([
+        _circle(-0.22, 0.56, 0.13), _circle(0.22, 0.56, 0.13),
+        _circle(0.0, 0.36, 0.28), _ellipse(0.0, -0.08, 0.40, 0.38),
+        _circle(-0.38, -0.06, 0.16), _circle(0.38, -0.06, 0.16),
+        _ellipse(-0.20, -0.56, 0.16, 0.14), _ellipse(0.20, -0.56, 0.16, 0.14),
+    ])
     templates.append(ShapeTemplate("Teddy Bear", teddy))
 
     return templates
@@ -316,16 +196,14 @@ def _build_templates(rng: random.Random) -> List[ShapeTemplate]:
 
 def mask_for_shape(shape_name: str, rng: random.Random | None = None) -> MaskFn:
     rng = rng or random.Random()
-    templates = _build_templates(rng)
-    for template in templates:
+    for template in _build_templates(rng):
         if template.name == shape_name:
             return template.mask
     raise KeyError(f"Unknown shape: {shape_name}")
 
 
 def all_shape_names() -> List[str]:
-    fixed_rng = random.Random(12345)
-    return [shape.name for shape in _build_templates(fixed_rng)]
+    return [shape.name for shape in _build_templates(random.Random(12345))]
 
 
 def shape_sequence(total_pages: int, rng: random.Random, min_gap: int = 3) -> List[str]:
@@ -343,7 +221,6 @@ def shape_sequence(total_pages: int, rng: random.Random, min_gap: int = 3) -> Li
             sequence.append(name)
 
         if len(sequence) < total_pages and all(any(n == prev for prev in sequence[-min_gap:]) for n in names):
-            # Relax only when unavoidable.
             candidate = rng.choice(names)
             if not sequence or candidate != sequence[-1]:
                 sequence.append(candidate)
@@ -355,9 +232,8 @@ def palette_sequence(total_pages: int, palettes: Iterable[str], rng: random.Rand
     colors = list(palettes)
     if not colors:
         return []
-
-    sequence: List[str] = []
-    while len(sequence) < total_pages:
+    out: List[str] = []
+    while len(out) < total_pages:
         rng.shuffle(colors)
-        sequence.extend(colors)
-    return sequence[:total_pages]
+        out.extend(colors)
+    return out[:total_pages]
