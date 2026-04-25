@@ -1,15 +1,40 @@
-from collections import deque
+"""Maze solving helpers."""
 
-def solve(grid):
-    R,C=len(grid),len(grid[0])
-    q=deque([((1,0),[])])
-    seen={(1,0)}
-    end=(R-2,C-1)
+from __future__ import annotations
+
+from collections import deque
+from typing import Dict, List, Tuple
+
+from maze_generator import DIRS, Maze
+
+Cell = Tuple[int, int]
+
+
+def solve_maze(maze: Maze) -> List[Cell]:
+    q = deque([maze.start])
+    parent: Dict[Cell, Cell | None] = {maze.start: None}
+
     while q:
-        (r,c),path=q.popleft()
-        if (r,c)==end:return path+[(r,c)]
-        for dr,dc in ((1,0),(-1,0),(0,1),(0,-1)):
-            nr,nc=r+dr,c+dc
-            if 0<=nr<R and 0<=nc<C and grid[nr][nc]==0 and (nr,nc) not in seen:
-                seen.add((nr,nc)); q.append(((nr,nc),path+[(r,c)]))
-    return []
+        cur = q.popleft()
+        if cur == maze.end:
+            break
+
+        r, c = cur
+        for dname, (dr, dc) in DIRS.items():
+            if maze.walls[cur][dname]:
+                continue
+            nxt = (r + dr, c + dc)
+            if nxt in maze.active_cells and nxt not in parent:
+                parent[nxt] = cur
+                q.append(nxt)
+
+    if maze.end not in parent:
+        return []
+
+    path: List[Cell] = []
+    cur: Cell | None = maze.end
+    while cur is not None:
+        path.append(cur)
+        cur = parent[cur]
+    path.reverse()
+    return path
