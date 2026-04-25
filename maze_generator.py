@@ -20,6 +20,8 @@ class Maze:
     walls: Dict[Cell, Dict[str, bool]]
     start: Cell
     end: Cell
+    start_open_side: str
+    end_open_side: str
     difficulty: str
 
 
@@ -63,7 +65,6 @@ def _build_masked_cells(rows: int, cols: int, shape: str) -> Set[Cell]:
             if mask(x, y):
                 cells.add((r, c))
 
-    # Keep only largest connected component to avoid isolated islands.
     if not cells:
         return cells
     largest = _connected_component(cells)
@@ -72,18 +73,48 @@ def _build_masked_cells(rows: int, cols: int, shape: str) -> Set[Cell]:
     return cells
 
 
-def _pick_endpoints(active_cells: Set[Cell], cols: int, rng: random.Random) -> tuple[Cell, Cell]:
-    leftish = sorted(active_cells, key=lambda cell: (cell[1], cell[0]))
-    rightish = sorted(active_cells, key=lambda cell: (-cell[1], cell[0]))
+def _exposed_sides(cell: Cell, active_cells: Set[Cell]) -> list[str]:
+    r, c = cell
+    sides: list[str] = []
+    for side, (dr, dc) in DIRS.items():
+        if (r + dr, c + dc) not in active_cells:
+            sides.append(side)
+    return sides
 
-    left_candidates = leftish[: max(3, len(leftish) // 15)]
-    right_candidates = rightish[: max(3, len(rightish) // 15)]
 
-    start = rng.choice(left_candidates)
-    end = rng.choice(right_candidates)
-    if start == end:
-        end = rightish[0]
-    return start, end
+def _side_priority(shape: str, side: str) -> int:
+    # Prefer left opening for start, right opening for finish when possible.
+    if shape in {"Circle", "Oval", "Heart", "Star", "Hexagon", "Diamond", "Square", "Rectangle", "Triangle", "Spiral"}:
+        order = {"W": 0, "E": 1, "N": 2, "S": 3}
+        return order.get(side, 99)
+    return 99
+
+
+def _pick_endpoint(active_cells: Set[Cell], prefer: str, shape: str, rng: random.Random) -> tuple[Cell, str]:
+    candidates: list[tuple[int, int, Cell, str]] = []
+    for cell in active_cells:
+        sides = _exposed_sides(cell, active_cells)
+        if not sides:
+            continue
+        for side in sides:
+            r, c = cell
+            horizontal_score = c if prefer == "left" else -c
+            side_pref = 0
+            if prefer == "left" and side == "W":
+                side_pref = -1000
+            if prefer == "right" and side == "E":
+                side_pref = -1000
+            candidates.append((horizontal_score + side_pref, _side_priority(shape, side), cell, side))
+
+    if not candidates:
+        # Fallback: any cell with any side
+        cell = rng.choice(list(active_cells))
+        return cell, "W" if prefer == "left" else "E"
+
+    candidates.sort(key=lambda t: (t[0], t[1]))
+    shortlist = candidates[: max(5, len(candidates) // 10)]
+    _, _, cell, side = rng.choice(shortlist)
+    return cell, side
 
 
 def generate_maze(
@@ -102,7 +133,10 @@ def generate_maze(
         cell: {"N": True, "S": True, "W": True, "E": True} for cell in active_cells
     }
 
-    start, end = _pick_endpoints(active_cells, cols, rng)
+    start, start_open_side = _pick_endpoint(active_cells, prefer="left", shape=shape, rng=rng)
+    end, end_open_side = _pick_endpoint(active_cells, prefer="right", shape=shape, rng=rng)
+    if start == end:
+        end, end_open_side = _pick_endpoint(active_cells - {start}, prefer="right", shape=shape, rng=rng)
 
     visited: Set[Cell] = set()
     stack: List[Cell] = [start]
@@ -117,7 +151,6 @@ def generate_maze(
             if nxt in active_cells and nxt not in visited:
                 neighbors.append((dname, nxt))
 
-        # Difficulty by directional stability: easier => straighter corridors.
         if neighbors:
             rng.shuffle(neighbors)
             if len(stack) > 1 and rng.random() < (0.65 - (difficulty_factor * 0.35)):
@@ -137,6 +170,10 @@ def generate_maze(
         else:
             stack.pop()
 
+    # Open entrance/exit to the outside world.
+    walls[start][start_open_side] = False
+    walls[end][end_open_side] = False
+
     return Maze(
         rows=rows,
         cols=cols,
@@ -145,5 +182,7 @@ def generate_maze(
         walls=walls,
         start=start,
         end=end,
+        start_open_side=start_open_side,
+        end_open_side=end_open_side,
         difficulty="",
     )
