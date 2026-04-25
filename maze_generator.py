@@ -56,8 +56,8 @@ def _connected_component(cells: Set[Cell]) -> Set[Cell]:
     return seen
 
 
-def _build_masked_cells(rows: int, cols: int, shape: str) -> Set[Cell]:
-    mask = mask_for_shape(shape)
+def _build_masked_cells(rows: int, cols: int, shape: str, rng: random.Random) -> Set[Cell]:
+    mask = mask_for_shape(shape, rng=rng)
     cells: Set[Cell] = set()
     for r in range(rows):
         for c in range(cols):
@@ -67,10 +67,28 @@ def _build_masked_cells(rows: int, cols: int, shape: str) -> Set[Cell]:
 
     if not cells:
         return cells
-    largest = _connected_component(cells)
-    if len(largest) < len(cells):
-        cells = largest
-    return cells
+
+    # Remove disconnected islands and keep biggest shape body.
+    unvisited = set(cells)
+    components: list[Set[Cell]] = []
+    while unvisited:
+        seed = next(iter(unvisited))
+        comp = set()
+        stack = [seed]
+        unvisited.remove(seed)
+        while stack:
+            cur = stack.pop()
+            comp.add(cur)
+            rr, cc = cur
+            for dr, dc in DIRS.values():
+                nxt = (rr + dr, cc + dc)
+                if nxt in unvisited:
+                    unvisited.remove(nxt)
+                    stack.append(nxt)
+        components.append(comp)
+
+    components.sort(key=len, reverse=True)
+    return components[0]
 
 
 def _exposed_sides(cell: Cell, active_cells: Set[Cell]) -> list[str]:
@@ -82,15 +100,7 @@ def _exposed_sides(cell: Cell, active_cells: Set[Cell]) -> list[str]:
     return sides
 
 
-def _side_priority(shape: str, side: str) -> int:
-    # Prefer left opening for start, right opening for finish when possible.
-    if shape in {"Circle", "Oval", "Heart", "Star", "Hexagon", "Diamond", "Square", "Rectangle", "Triangle", "Spiral"}:
-        order = {"W": 0, "E": 1, "N": 2, "S": 3}
-        return order.get(side, 99)
-    return 99
-
-
-def _pick_endpoint(active_cells: Set[Cell], prefer: str, shape: str, rng: random.Random) -> tuple[Cell, str]:
+def _pick_endpoint(active_cells: Set[Cell], prefer: str, rng: random.Random) -> tuple[Cell, str]:
     candidates: list[tuple[int, int, Cell, str]] = []
     for cell in active_cells:
         sides = _exposed_sides(cell, active_cells)
@@ -104,15 +114,15 @@ def _pick_endpoint(active_cells: Set[Cell], prefer: str, shape: str, rng: random
                 side_pref = -1000
             if prefer == "right" and side == "E":
                 side_pref = -1000
-            candidates.append((horizontal_score + side_pref, _side_priority(shape, side), cell, side))
+            vertical_soft = abs(r)
+            candidates.append((horizontal_score + side_pref, vertical_soft, cell, side))
 
     if not candidates:
-        # Fallback: any cell with any side
         cell = rng.choice(list(active_cells))
         return cell, "W" if prefer == "left" else "E"
 
     candidates.sort(key=lambda t: (t[0], t[1]))
-    shortlist = candidates[: max(5, len(candidates) // 10)]
+    shortlist = candidates[: max(8, len(candidates) // 8)]
     _, _, cell, side = rng.choice(shortlist)
     return cell, side
 
@@ -125,18 +135,16 @@ def generate_maze(
     rng: random.Random,
 ) -> Maze:
     """Generate a perfect maze constrained to a shape mask."""
-    active_cells = _build_masked_cells(rows, cols, shape)
-    if len(active_cells) < 10:
+    active_cells = _build_masked_cells(rows, cols, shape, rng=rng)
+    if len(active_cells) < 24:
         raise ValueError(f"Shape {shape} produced too few cells.")
 
     walls: Dict[Cell, Dict[str, bool]] = {
         cell: {"N": True, "S": True, "W": True, "E": True} for cell in active_cells
     }
 
-    start, start_open_side = _pick_endpoint(active_cells, prefer="left", shape=shape, rng=rng)
-    end, end_open_side = _pick_endpoint(active_cells, prefer="right", shape=shape, rng=rng)
-    if start == end:
-        end, end_open_side = _pick_endpoint(active_cells - {start}, prefer="right", shape=shape, rng=rng)
+    start, start_open_side = _pick_endpoint(active_cells, prefer="left", rng=rng)
+    end, end_open_side = _pick_endpoint(active_cells - {start}, prefer="right", rng=rng)
 
     visited: Set[Cell] = set()
     stack: List[Cell] = [start]
@@ -153,7 +161,8 @@ def generate_maze(
 
         if neighbors:
             rng.shuffle(neighbors)
-            if len(stack) > 1 and rng.random() < (0.65 - (difficulty_factor * 0.35)):
+            # Easier => slightly straighter corridors.
+            if len(stack) > 1 and rng.random() < (0.60 - (difficulty_factor * 0.32)):
                 prev = stack[-2]
                 pd = (r - prev[0], c - prev[1])
                 for idx, (_, nxt) in enumerate(neighbors):
@@ -170,7 +179,7 @@ def generate_maze(
         else:
             stack.pop()
 
-    # Open entrance/exit to the outside world.
+    # Open to outside world.
     walls[start][start_open_side] = False
     walls[end][end_open_side] = False
 
