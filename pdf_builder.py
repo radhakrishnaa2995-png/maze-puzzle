@@ -44,7 +44,6 @@ def _draw_page_background(c: canvas.Canvas, bg: colors.Color, page_no: int, titl
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
-    # Decorative confetti circles.
     for _ in range(24):
         pastel = rng.choice(PASTEL_PALETTE)
         c.setFillColor(colors.Color(pastel.red, pastel.green, pastel.blue, alpha=0.30))
@@ -94,9 +93,12 @@ def _draw_maze(
     ox = frame_x + (frame_w - maze.cols * cell) / 2
     oy = frame_y + (frame_h - maze.rows * cell) / 2
 
-    c.setStrokeColor(colors.HexColor("#111111"))
-    c.setLineWidth(1.55)
+    # Inner maze walls (lighter, cleaner).
+    c.setStrokeColor(colors.HexColor("#7A7A7A"))
+    c.setLineWidth(1.0)
     c.setLineCap(1)
+
+    outline_segments: list[tuple[float, float, float, float]] = []
 
     for r in range(maze.rows):
         for col in range(maze.cols):
@@ -108,6 +110,7 @@ def _draw_maze(
             x0, y0 = ox + col * cell, oy + (maze.rows - 1 - r) * cell
             x1, y1 = x0 + cell, y0 + cell
 
+            # Draw internal + boundary walls in thin gray first.
             if walls["N"]:
                 c.line(x0, y1, x1, y1)
             if walls["S"]:
@@ -116,6 +119,27 @@ def _draw_maze(
                 c.line(x0, y0, x0, y1)
             if walls["E"]:
                 c.line(x1, y0, x1, y1)
+
+            # Collect silhouette boundary for thick black outline.
+            up = (r - 1, col) not in maze.active_cells
+            dn = (r + 1, col) not in maze.active_cells
+            lf = (r, col - 1) not in maze.active_cells
+            rt = (r, col + 1) not in maze.active_cells
+
+            if up and not (idx == maze.start and maze.start_open_side == "N") and not (idx == maze.end and maze.end_open_side == "N"):
+                outline_segments.append((x0, y1, x1, y1))
+            if dn and not (idx == maze.start and maze.start_open_side == "S") and not (idx == maze.end and maze.end_open_side == "S"):
+                outline_segments.append((x0, y0, x1, y0))
+            if lf and not (idx == maze.start and maze.start_open_side == "W") and not (idx == maze.end and maze.end_open_side == "W"):
+                outline_segments.append((x0, y0, x0, y1))
+            if rt and not (idx == maze.start and maze.start_open_side == "E") and not (idx == maze.end and maze.end_open_side == "E"):
+                outline_segments.append((x1, y0, x1, y1))
+
+    # Strong silhouette outline like reference sample.
+    c.setStrokeColor(colors.HexColor("#111111"))
+    c.setLineWidth(2.4)
+    for x0, y0, x1, y1 in outline_segments:
+        c.line(x0, y0, x1, y1)
 
     def _marker(cell_rc: tuple[int, int], text: str, fill: colors.Color) -> None:
         rr, cc = cell_rc
@@ -157,7 +181,7 @@ def _draw_maze(
         c.drawCentredString(px + dx, py + dy - 2.7, label)
 
     if show_solution and path:
-        c.setStrokeColor(colors.HexColor("#E11D48"))  # red solution path
+        c.setStrokeColor(colors.HexColor("#E11D48"))
         c.setLineWidth(max(2.1, cell * 0.24))
         pts = []
         for rr, cc in path:
