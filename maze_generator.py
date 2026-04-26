@@ -199,7 +199,7 @@ def generate_maze(
 
     # Difficulty controls
     straight_bias = max(0.05, 0.70 - difficulty_factor * 0.65)
-    loop_factor = min(0.22, max(0.0, (difficulty_factor - 0.42) * 0.45))
+    loop_factor = min(0.28, max(0.0, (difficulty_factor - 0.35) * 0.55))
 
     _carve_dfs(cells, walls, start, rng, branch_bias=straight_bias)
     _add_loops(cells, walls, rng, loop_factor=loop_factor)
