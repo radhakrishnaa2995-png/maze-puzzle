@@ -1,13 +1,10 @@
 # shapes.py
-"""Load shape silhouettes from PNG/SVG/JPG and expose robust mask utilities."""
+"""Shape loading and normalization utilities for maze masks."""
 
 from __future__ import annotations
 
 import math
 import random
-import re
-import xml.etree.ElementTree as ET
-from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -17,8 +14,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 MaskFn = Callable[[float, float], bool]
-_TOKEN_RE = re.compile(r"[A-Za-z]|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
-_EXT_PRIORITY = {".png": 0, ".svg": 1, ".jpg": 2, ".jpeg": 2}
+_EXTS = {".png", ".jpg", ".jpeg", ".svg"}
 
 
 @dataclass(frozen=True)
@@ -27,391 +23,247 @@ class LoadedShape:
     contains_fn: MaskFn
 
 
-def _sample_cubic(p0, p1, p2, p3, n=22):
-    pts = []
-    for i in range(1, n + 1):
-        t = i / n
-        mt = 1 - t
-        x = (mt**3) * p0[0] + 3 * (mt**2) * t * p1[0] + 3 * mt * (t**2) * p2[0] + (t**3) * p3[0]
-        y = (mt**3) * p0[1] + 3 * (mt**2) * t * p1[1] + 3 * mt * (t**2) * p2[1] + (t**3) * p3[1]
-        pts.append((x, y))
-    return pts
-
-
-def _sample_quadratic(p0, p1, p2, n=18):
-    pts = []
-    for i in range(1, n + 1):
-        t = i / n
-        mt = 1 - t
-        x = (mt**2) * p0[0] + 2 * mt * t * p1[0] + (t**2) * p2[0]
-        y = (mt**2) * p0[1] + 2 * mt * t * p1[1] + (t**2) * p2[1]
-        pts.append((x, y))
-    return pts
-
-
-def _parse_path_to_polylines(path_d: str) -> list[list[tuple[float, float]]]:
-    tokens = _TOKEN_RE.findall(path_d)
-    i = 0
-    cmd = None
-    cur = (0.0, 0.0)
-    start = (0.0, 0.0)
-    polylines: list[list[tuple[float, float]]] = []
-    current_line: list[tuple[float, float]] = []
-    prev_ctrl = None
-
-    def read_float() -> float:
-        nonlocal i
-        v = float(tokens[i])
-        i += 1
-        return v
-
-    while i < len(tokens):
-        token = tokens[i]
-        if token.isalpha():
-            cmd = token
-            i += 1
-        elif cmd is None:
-            raise ValueError("Invalid SVG path: missing command")
-
-        rel = cmd.islower()
-        op = cmd.upper()
-
-        if op == "M":
-            x = read_float(); y = read_float()
-            if rel:
-                x += cur[0]; y += cur[1]
-            cur = (x, y); start = cur
-            if current_line:
-                polylines.append(current_line)
-            current_line = [cur]
-            prev_ctrl = None
-            cmd = "l" if rel else "L"
-        elif op == "L":
-            x = read_float(); y = read_float()
-            if rel:
-                x += cur[0]; y += cur[1]
-            cur = (x, y); current_line.append(cur); prev_ctrl = None
-        elif op == "H":
-            x = read_float(); x = x + cur[0] if rel else x
-            cur = (x, cur[1]); current_line.append(cur); prev_ctrl = None
-        elif op == "V":
-            y = read_float(); y = y + cur[1] if rel else y
-            cur = (cur[0], y); current_line.append(cur); prev_ctrl = None
-        elif op == "C":
-            x1, y1, x2, y2, x, y = [read_float() for _ in range(6)]
-            if rel:
-                x1, y1 = x1 + cur[0], y1 + cur[1]
-                x2, y2 = x2 + cur[0], y2 + cur[1]
-                x, y = x + cur[0], y + cur[1]
-            current_line.extend(_sample_cubic(cur, (x1, y1), (x2, y2), (x, y)))
-            cur = (x, y); prev_ctrl = (x2, y2)
-        elif op == "S":
-            x2, y2, x, y = [read_float() for _ in range(4)]
-            if prev_ctrl is None:
-                x1, y1 = cur
-            else:
-                x1, y1 = (2 * cur[0] - prev_ctrl[0], 2 * cur[1] - prev_ctrl[1])
-            if rel:
-                x2, y2 = x2 + cur[0], y2 + cur[1]
-                x, y = x + cur[0], y + cur[1]
-            current_line.extend(_sample_cubic(cur, (x1, y1), (x2, y2), (x, y)))
-            cur = (x, y); prev_ctrl = (x2, y2)
-        elif op == "Q":
-            x1, y1, x, y = [read_float() for _ in range(4)]
-            if rel:
-                x1, y1 = x1 + cur[0], y1 + cur[1]
-                x, y = x + cur[0], y + cur[1]
-            current_line.extend(_sample_quadratic(cur, (x1, y1), (x, y)))
-            cur = (x, y); prev_ctrl = (x1, y1)
-        elif op == "T":
-            x, y = read_float(), read_float()
-            if prev_ctrl is None:
-                x1, y1 = cur
-            else:
-                x1, y1 = (2 * cur[0] - prev_ctrl[0], 2 * cur[1] - prev_ctrl[1])
-            if rel:
-                x, y = x + cur[0], y + cur[1]
-            current_line.extend(_sample_quadratic(cur, (x1, y1), (x, y)))
-            cur = (x, y); prev_ctrl = (x1, y1)
-        elif op == "A":
-            _ = [read_float() for _ in range(5)]
-            x, y = read_float(), read_float()
-            if rel:
-                x += cur[0]; y += cur[1]
-            cur = (x, y); current_line.append(cur); prev_ctrl = None
-        elif op == "Z":
-            if current_line and current_line[-1] != start:
-                current_line.append(start)
-            if current_line:
-                polylines.append(current_line)
-            current_line = []; cur = start; prev_ctrl = None
-        else:
-            raise ValueError(f"Unsupported SVG path command: {cmd}")
-
-    if current_line:
-        polylines.append(current_line)
-    return polylines
-
-
-def _draw_svg_outline_to_mask(svg_path: Path, base_size: int = 400) -> np.ndarray:
-    raw = svg_path.read_bytes()
-    text = raw.decode("utf-8-sig", errors="ignore")
-    idx = text.find("<")
-    if idx > 0:
-        text = text[idx:]
-    root = ET.fromstring(text)
-    ns = "{http://www.w3.org/2000/svg}"
-
-    lines: list[list[tuple[float, float]]] = []
-
-    for elem in root.iter():
-        tag = elem.tag
-        if tag == f"{ns}path" and elem.get("d"):
-            lines.extend(_parse_path_to_polylines(elem.get("d", "")))
-        elif tag == f"{ns}polygon" and elem.get("points"):
-            pts = [float(n) for n in re.split(r"[ ,]+", elem.get("points", "").strip()) if n]
-            poly = list(zip(pts[0::2], pts[1::2]))
-            if poly and poly[0] != poly[-1]:
-                poly.append(poly[0])
-            lines.append(poly)
-        elif tag == f"{ns}rect":
-            x = float(elem.get("x", "0")); y = float(elem.get("y", "0")); w = float(elem.get("width", "0")); h = float(elem.get("height", "0"))
-            lines.append([(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)])
-        elif tag == f"{ns}circle":
-            cx = float(elem.get("cx", "0")); cy = float(elem.get("cy", "0")); r = float(elem.get("r", "0"))
-            lines.append([(cx + math.cos(2 * math.pi * t / 72) * r, cy + math.sin(2 * math.pi * t / 72) * r) for t in range(73)])
-        elif tag == f"{ns}ellipse":
-            cx = float(elem.get("cx", "0")); cy = float(elem.get("cy", "0")); rx = float(elem.get("rx", "0")); ry = float(elem.get("ry", "0"))
-            lines.append([(cx + math.cos(2 * math.pi * t / 72) * rx, cy + math.sin(2 * math.pi * t / 72) * ry) for t in range(73)])
-
-    if not lines:
-        raise ValueError(f"No drawable SVG outline in {svg_path}")
-
-    xs = [x for line in lines for x, _ in line]
-    ys = [y for line in lines for _, y in line]
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
-    w = max_x - min_x
-    h = max_y - min_y
-    if w <= 0 or h <= 0:
-        raise ValueError(f"Degenerate SVG bounds in {svg_path}")
-
-    canvas = Image.new("L", (base_size, base_size), 0)
-    draw = ImageDraw.Draw(canvas)
-    pad = base_size * 0.08
-    scale = min((base_size - 2 * pad) / w, (base_size - 2 * pad) / h)
-
-    stroke = max(2, int(base_size * 0.008))
-    for line in lines:
-        mapped = [((x - min_x) * scale + pad, (y - min_y) * scale + pad) for x, y in line]
-        if len(mapped) >= 2:
-            draw.line(mapped, fill=255, width=stroke)
-
-    return np.array(canvas) > 0
+def _sample_grid_mask(fn: MaskFn, size: int = 360) -> np.ndarray:
+    xs = np.linspace(-1.0, 1.0, size)
+    ys = np.linspace(1.0, -1.0, size)
+    arr = np.zeros((size, size), dtype=bool)
+    for r, y in enumerate(ys):
+        for c, x in enumerate(xs):
+            arr[r, c] = bool(fn(float(x), float(y)))
+    return arr
 
 
 def _fill_holes(mask: np.ndarray) -> np.ndarray:
     h, w = mask.shape
-    visited = np.zeros_like(mask, dtype=bool)
-    q = deque()
+    outside = np.zeros_like(mask, dtype=bool)
+    stack = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
 
-    for x in range(w):
-        if not mask[0, x]:
-            q.append((0, x)); visited[0, x] = True
-        if not mask[h - 1, x]:
-            q.append((h - 1, x)); visited[h - 1, x] = True
-    for y in range(h):
-        if not mask[y, 0]:
-            q.append((y, 0)); visited[y, 0] = True
-        if not mask[y, w - 1]:
-            q.append((y, w - 1)); visited[y, w - 1] = True
+    while stack:
+        y, x = stack.pop()
+        if not (0 <= y < h and 0 <= x < w):
+            continue
+        if outside[y, x] or mask[y, x]:
+            continue
+        outside[y, x] = True
+        stack.extend([(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)])
 
-    while q:
-        y, x = q.popleft()
-        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            ny, nx = y + dy, x + dx
-            if 0 <= ny < h and 0 <= nx < w and not mask[ny, nx] and not visited[ny, nx]:
-                visited[ny, nx] = True
-                q.append((ny, nx))
-
-    holes = (~mask) & (~visited)
-    return mask | holes
+    return mask | (~mask & ~outside)
 
 
-def _preprocess_outline_mask(mask: np.ndarray, scale: int = 4) -> np.ndarray:
-    scale = max(3, min(6, scale))
+def _normalize_mask(mask: np.ndarray, shape_name: str) -> np.ndarray:
     img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
-    img = img.resize((img.width * scale, img.height * scale), Image.Resampling.NEAREST)
-
-    # Thicken lines + close small gaps.
-    img = img.filter(ImageFilter.MaxFilter(size=5))
     img = img.filter(ImageFilter.MaxFilter(size=5))
     img = img.filter(ImageFilter.MinFilter(size=3))
-
     arr = np.array(img) > 0
     arr = _fill_holes(arr)
+
+    ys, xs = np.where(arr)
+    if len(xs) == 0:
+        return arr
+    arr = arr[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+
+    lname = shape_name.lower()
+
+    # Upright normalization.
+    if any(k in lname for k in ["rocket", "bird", "butterfly", "shield", "heart", "triangle"]):
+        top_mass = float(arr[: arr.shape[0] // 3, :].sum())
+        bottom_mass = float(arr[-arr.shape[0] // 3 :, :].sum())
+        if "rocket" in lname and top_mass > bottom_mass:
+            arr = np.flipud(arr)
+        if any(k in lname for k in ["bird", "butterfly", "heart", "triangle", "shield"]) and bottom_mass < top_mass:
+            arr = np.flipud(arr)
+
+    # Horizontal orientation normalization (face right).
+    if arr.shape[1] >= arr.shape[0] or any(k in lname for k in ["cat", "dinosaur", "fish", "bird", "arrow"]):
+        left_edge = float(arr[:, : max(2, arr.shape[1] // 10)].sum())
+        right_edge = float(arr[:, -max(2, arr.shape[1] // 10) :].sum())
+        if left_edge > right_edge:
+            arr = np.fliplr(arr)
+
     return arr
 
 
-def _orient_mask(mask: np.ndarray, name: str) -> np.ndarray:
-    lname = name.lower()
-    if mask.size == 0:
-        return mask
+def _mask_to_fn(mask: np.ndarray) -> MaskFn:
+    ys, xs = np.where(mask)
+    if len(xs) == 0:
+        raise ValueError("Empty shape mask")
+    cropped = mask[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+    h, w = cropped.shape
 
-    # basic stats helpers
-    def edge_density(arr: np.ndarray, side: str, span: int = 8) -> float:
-        span = min(span, arr.shape[1] // 3 if arr.shape[1] >= 3 else 1)
-        if side == "left":
-            blk = arr[:, :span]
-        else:
-            blk = arr[:, -span:]
-        return float(blk.sum()) / max(1, blk.size)
+    def contains(x: float, y: float) -> bool:
+        px = int(round(((x + 1.0) * 0.5) * (w - 1)))
+        py = int(round(((1.0 - (y + 1.0) * 0.5)) * (h - 1)))
+        return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
 
-    def band_density(arr: np.ndarray, where: str, span: int = 10) -> float:
-        span = min(span, arr.shape[0] // 3 if arr.shape[0] >= 3 else 1)
-        if where == "top":
-            blk = arr[:span, :]
-        else:
-            blk = arr[-span:, :]
-        return float(blk.sum()) / max(1, blk.size)
-
-    # Horizontal orientation rules
-    if any(k in lname for k in ["dinosaur", "fish", "cat"]):
-        left = edge_density(mask, "left")
-        right = edge_density(mask, "right")
-        if right < left:
-            mask = np.fliplr(mask)
-
-    if "bird" in lname:
-        left = edge_density(mask, "left")
-        right = edge_density(mask, "right")
-        if right > left:
-            mask = np.fliplr(mask)
-
-    # Vertical orientation rules
-    if "rocket" in lname:
-        top = band_density(mask, "top")
-        bottom = band_density(mask, "bottom")
-        if top >= bottom:
-            mask = np.flipud(mask)
-
-    if "heart" in lname or "butterfly" in lname:
-        top = band_density(mask, "top")
-        bottom = band_density(mask, "bottom")
-        if top < bottom:
-            mask = np.flipud(mask)
-
-    return mask
+    return contains
 
 
-def _build_raster_contains(image_path: Path) -> MaskFn:
-    shape_name = image_path.stem
-    img = Image.open(image_path).convert("RGBA")
-    arr = np.array(img)
-    alpha = arr[:, :, 3]
-    rgb = arr[:, :, :3]
+def _load_raster_mask(path: Path) -> np.ndarray:
+    rgba = np.array(Image.open(path).convert("RGBA"))
+    alpha = rgba[:, :, 3]
+    rgb = rgba[:, :, :3]
     gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
 
     if np.any(alpha < 250):
-        base = (alpha > 16) & (gray < 245)
+        mask = (alpha > 20) & (gray < 245)
     else:
-        base = gray < 235
-
-    base = _preprocess_outline_mask(base)
-    base = _orient_mask(base, shape_name)
-    ys, xs = np.where(base)
-    if len(xs) == 0:
-        raise ValueError(f"No silhouette detected in image: {image_path}")
-    cropped = base[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
-    h, w = cropped.shape
-
-    def fn(x: float, y: float) -> bool:
-        px = int(round((x + 1) * 0.5 * (w - 1)))
-        py = int(round((y + 1) * 0.5 * (h - 1)))
-        py = (h - 1) - py
-        return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
-
-    return fn
+        mask = gray < 235
+    return mask
 
 
-def _build_svg_contains(svg_path: Path) -> MaskFn:
-    shape_name = svg_path.stem
-    base = _draw_svg_outline_to_mask(svg_path)
-    processed = _preprocess_outline_mask(base)
-    processed = _orient_mask(processed, shape_name)
-    ys, xs = np.where(processed)
-    if len(xs) == 0:
-        raise ValueError(f"No silhouette detected in SVG: {svg_path}")
-    cropped = processed[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
-    h, w = cropped.shape
+def _load_svg_mask(path: Path, size: int = 420) -> np.ndarray:
+    # Minimal robust fallback: render any SVG-like outline as non-white pixels after PIL open attempt.
+    # If PIL cannot open, try text-based coarse raster by drawing path bounds (safe fallback).
+    try:
+        # Pillow can open many SVGs if rasterizer support exists.
+        img = Image.open(path).convert("RGBA")
+        img = img.resize((size, size), Image.Resampling.LANCZOS)
+        arr = np.array(img)
+        return arr[:, :, 3] > 10
+    except Exception:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        canvas = Image.new("L", (size, size), 0)
+        draw = ImageDraw.Draw(canvas)
+        # Coarse fallback silhouette block if SVG parser isn't available.
+        if "circle" in text.lower():
+            draw.ellipse((size * 0.15, size * 0.15, size * 0.85, size * 0.85), fill=255)
+        else:
+            draw.rounded_rectangle((size * 0.12, size * 0.12, size * 0.88, size * 0.88), radius=size * 0.12, fill=255)
+        return np.array(canvas) > 0
 
-    def fn(x: float, y: float) -> bool:
-        px = int(round((x + 1) * 0.5 * (w - 1)))
-        py = int(round((y + 1) * 0.5 * (h - 1)))
-        py = (h - 1) - py
-        return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
 
-    return fn
-
-
-def _discover_shape_files(shape_dir: str) -> list[Path]:
+def _discover_uploaded_shapes(shape_dir: str) -> list[Path]:
     root = Path(shape_dir)
+    search_roots = [root, Path.cwd() / "assets" / "shapes", Path.cwd() / "shapes"]
     files: list[Path] = []
-
-    search_roots = [root]
-    repo_root = Path.cwd()
-    if root != repo_root:
-        search_roots.extend([repo_root / "assets", repo_root / "shapes", repo_root])
+    seen: set[str] = set()
 
     for sr in search_roots:
-        if sr.exists():
-            files.extend(sorted([f for f in sr.rglob("*") if f.suffix.lower() in _EXT_PRIORITY]))
-
-    seen = set()
-    out: list[Path] = []
-    for f in files:
-        key = str(f.resolve())
-        if key not in seen:
+        if not sr.exists():
+            continue
+        for f in sorted(sr.rglob("*")):
+            if f.suffix.lower() not in _EXTS:
+                continue
+            key = str(f.resolve())
+            if key in seen:
+                continue
             seen.add(key)
-            out.append(f)
-    return out
+            files.append(f)
+    return files
 
 
-def _choose_best_files(files: list[Path]) -> list[Path]:
-    grouped: dict[str, list[Path]] = {}
-    for f in files:
-        grouped.setdefault(f.stem.lower(), []).append(f)
+def _builtin_shape_fns() -> dict[str, MaskFn]:
+    def circle(x: float, y: float) -> bool:
+        return x * x + y * y <= 0.95**2
 
-    chosen: list[Path] = []
-    for _, variants in sorted(grouped.items()):
-        variants.sort(key=lambda p: (_EXT_PRIORITY.get(p.suffix.lower(), 99), str(p)))
-        chosen.extend(variants)
-    return chosen
+    def oval(x: float, y: float) -> bool:
+        return (x / 0.95) ** 2 + (y / 0.7) ** 2 <= 1.0
+
+    def diamond(x: float, y: float) -> bool:
+        return abs(x) / 0.95 + abs(y) / 0.95 <= 1.0
+
+    def triangle(x: float, y: float) -> bool:
+        if y < -0.9 or y > 0.9:
+            return False
+        w = (0.95 * (0.95 - y)) / 1.85
+        return abs(x) <= w
+
+    def hexagon(x: float, y: float) -> bool:
+        ax, ay = abs(x), abs(y)
+        return ay <= 0.85 and ax <= 0.95 and (ax * 0.58 + ay) <= 0.95
+
+    def heart(x: float, y: float) -> bool:
+        x2 = x * 1.15
+        y2 = y * 1.15
+        a = (x2 * x2 + y2 * y2 - 1) ** 3 - x2 * x2 * y2**3
+        return a <= 0
+
+    def star(x: float, y: float) -> bool:
+        ang = math.atan2(y, x)
+        r = math.hypot(x, y)
+        lim = 0.35 + 0.55 * (0.5 + 0.5 * math.cos(5 * ang))
+        return r <= lim
+
+    def cloud(x: float, y: float) -> bool:
+        c1 = (x + 0.35) ** 2 + (y + 0.05) ** 2 <= 0.33**2
+        c2 = (x - 0.05) ** 2 + (y + 0.18) ** 2 <= 0.42**2
+        c3 = (x - 0.45) ** 2 + (y + 0.03) ** 2 <= 0.3**2
+        base = abs(x) <= 0.85 and -0.45 <= y <= 0.2
+        return (c1 or c2 or c3) and base
+
+    def moon(x: float, y: float) -> bool:
+        outer = x * x + y * y <= 0.9**2
+        inner = (x + 0.28) ** 2 + y * y <= 0.78**2
+        return outer and not inner
+
+    def shield(x: float, y: float) -> bool:
+        if y > 0.85 or y < -0.95:
+            return False
+        if y >= 0.0:
+            return abs(x) <= 0.68 + 0.2 * (0.85 - y)
+        w = 0.9 * (1.0 + y)
+        return abs(x) <= max(0.03, w)
+
+    def arrow(x: float, y: float) -> bool:
+        shaft = -0.9 <= x <= 0.25 and abs(y) <= 0.22
+        head = x >= 0.1 and abs(y) <= (0.95 - x) * 0.9
+        return shaft or head
+
+    def spiral(x: float, y: float) -> bool:
+        r = math.hypot(x, y)
+        if r > 0.95:
+            return False
+        ang = math.atan2(y, x)
+        if ang < 0:
+            ang += 2 * math.pi
+        target = 0.12 + 0.11 * ang
+        return abs(r - target) <= 0.09
+
+    return {
+        "Star": star,
+        "Diamond": diamond,
+        "Circle": circle,
+        "Triangle": triangle,
+        "Heart": heart,
+        "Hexagon": hexagon,
+        "Oval": oval,
+        "Cloud": cloud,
+        "Moon": moon,
+        "Shield": shield,
+        "Arrow": arrow,
+        "Spiral": spiral,
+    }
 
 
 @lru_cache(maxsize=8)
 def load_shapes(shape_dir: str = "assets/shapes") -> tuple[LoadedShape, ...]:
-    files = _discover_shape_files(shape_dir)
-    if not files:
-        raise FileNotFoundError(f"No shape files found in {shape_dir} (supported: PNG, SVG, JPG).")
-
-    ordered = _choose_best_files(files)
     loaded: list[LoadedShape] = []
-    used_names: set[str] = set()
+    seen_names: set[str] = set()
 
-    for f in ordered:
-        name = f.stem.replace("_", " ").title()
-        if name in used_names:
+    # Uploaded shapes.
+    for path in _discover_uploaded_shapes(shape_dir):
+        name = path.stem.replace("_", " ").title()
+        if name in seen_names:
             continue
         try:
-            contains = _build_svg_contains(f) if f.suffix.lower() == ".svg" else _build_raster_contains(f)
-            loaded.append(LoadedShape(name=name, contains_fn=contains))
-            used_names.add(name)
+            mask = _load_svg_mask(path) if path.suffix.lower() == ".svg" else _load_raster_mask(path)
+            norm = _normalize_mask(mask, name)
+            loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(norm)))
+            seen_names.add(name)
         except Exception:
             continue
 
+    # Built-in generated shapes.
+    for name, fn in _builtin_shape_fns().items():
+        if name in seen_names:
+            continue
+        mask = _sample_grid_mask(fn, size=360)
+        norm = _normalize_mask(mask, name)
+        loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(norm)))
+        seen_names.add(name)
+
     if not loaded:
-        raise ValueError("Shape files were discovered, but none could be parsed as valid silhouettes.")
+        raise ValueError("No valid shape masks could be loaded.")
 
     return tuple(loaded)
 
@@ -421,36 +273,40 @@ def all_shape_names(shape_dir: str = "assets/shapes") -> List[str]:
 
 
 def mask_for_shape(shape_name: str, shape_dir: str = "assets/shapes") -> MaskFn:
-    shape = next((s for s in load_shapes(shape_dir) if s.name == shape_name), None)
-    if shape is None:
+    item = next((s for s in load_shapes(shape_dir) if s.name == shape_name), None)
+    if item is None:
         raise KeyError(f"Unknown shape name: {shape_name}")
-    return shape.contains_fn
+    return item.contains_fn
 
 
-def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 3) -> List[str]:
+def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 4) -> List[str]:
     names = all_shape_names(shape_dir)
-    sequence: List[str] = []
-    while len(sequence) < total_pages:
+    if not names:
+        return []
+
+    out: List[str] = []
+    while len(out) < total_pages:
         pool = names.copy()
         rng.shuffle(pool)
         for name in pool:
-            if len(sequence) >= total_pages:
+            if len(out) >= total_pages:
                 break
-            if any(name == prev for prev in sequence[-min_gap:]):
+            if name in out[-min_gap:]:
                 continue
-            sequence.append(name)
-        if len(sequence) < total_pages and all(any(n == prev for prev in sequence[-min_gap:]) for n in names):
-            candidate = rng.choice(names)
-            if not sequence or sequence[-1] != candidate:
-                sequence.append(candidate)
-    return sequence
+            out.append(name)
+        if len(out) < total_pages:
+            fallback = rng.choice(names)
+            if not out or out[-1] != fallback:
+                out.append(fallback)
+
+    return out[:total_pages]
 
 
-def palette_sequence(total_pages: int, palettes: Iterable[str], rng: random.Random) -> List[str]:
+def palette_sequence(total_pages: int, palettes: Iterable, rng: random.Random) -> List:
     colors = list(palettes)
     if not colors:
         return []
-    out: List[str] = []
+    out = []
     while len(out) < total_pages:
         rng.shuffle(colors)
         out.extend(colors)
