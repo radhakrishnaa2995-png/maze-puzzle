@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import random
+import re
 from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List
 
 import numpy as np
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageFilter
 
 MaskFn = Callable[[float, float], bool]
 _ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".svg"}
@@ -21,6 +22,14 @@ _ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".svg"}
 class LoadedShape:
     name: str
     contains_fn: MaskFn
+    source_file: str
+
+
+def _clean_name(path: Path) -> str:
+    base = path.stem
+    base = re.sub(r"[._-]+", " ", base)
+    base = re.sub(r"\s+", " ", base).strip()
+    return base.title() if base else "Shape"
 
 
 def _fill_holes(mask: np.ndarray) -> np.ndarray:
@@ -55,7 +64,7 @@ def _fill_holes(mask: np.ndarray) -> np.ndarray:
 
 
 def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
-    # Preserve orientation; only strengthen outline and fill interior.
+    # Keep original orientation; only strengthen line-art and fill enclosed shape.
     img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
     img = img.filter(ImageFilter.MaxFilter(size=5))
     img = img.filter(ImageFilter.MaxFilter(size=5))
@@ -71,7 +80,8 @@ def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
 
 
 def _raster_mask(path: Path) -> np.ndarray:
-    img = ImageOps.exif_transpose(Image.open(path)).convert("RGBA")
+    # No auto-rotate/flip: read exactly as uploaded.
+    img = Image.open(path).convert("RGBA")
     rgba = np.array(img)
     alpha = rgba[:, :, 3]
     gray = np.array(img.convert("L"), dtype=np.uint8)
@@ -141,16 +151,19 @@ def _shape_files(shape_dir: str) -> list[Path]:
     return files
 
 
-@lru_cache(maxsize=8)
-def load_shapes(shape_dir: str = "assets/shapes") -> tuple[LoadedShape, ...]:
+@lru_cache(maxsize=16)
+def load_shapes(shape_dir: str = "assets/shapes", orientation_mode: str = "original") -> tuple[LoadedShape, ...]:
+    if orientation_mode != "original":
+        raise ValueError("orientation_mode must be 'original'")
+
     files = _shape_files(shape_dir)
     loaded: list[LoadedShape] = []
 
     for path in files:
-        name = path.stem.replace("_", " ").replace("-", " ").title()
+        name = _clean_name(path)
         try:
             raw = _svg_mask(path) if path.suffix.lower() == ".svg" else _raster_mask(path)
-            loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(raw)))
+            loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(raw), source_file=path.name))
             print(f"Loaded {path.name}")
         except Exception:
             continue
@@ -158,40 +171,34 @@ def load_shapes(shape_dir: str = "assets/shapes") -> tuple[LoadedShape, ...]:
     if not loaded:
         raise ValueError(f"No valid uploaded shapes found in {shape_dir}")
 
+    print(f"Loaded {len(loaded)} shapes")
     return tuple(loaded)
 
 
-def all_shape_names(shape_dir: str = "assets/shapes") -> List[str]:
-    return [s.name for s in load_shapes(shape_dir)]
+def all_shape_names(shape_dir: str = "assets/shapes", orientation_mode: str = "original") -> List[str]:
+    return [s.name for s in load_shapes(shape_dir, orientation_mode)]
 
 
-def mask_for_shape(shape_name: str, shape_dir: str = "assets/shapes") -> MaskFn:
-    shape = next((s for s in load_shapes(shape_dir) if s.name == shape_name), None)
+def mask_for_shape(shape_name: str, shape_dir: str = "assets/shapes", orientation_mode: str = "original") -> MaskFn:
+    shape = next((s for s in load_shapes(shape_dir, orientation_mode) if s.name == shape_name), None)
     if shape is None:
         raise KeyError(f"Unknown shape: {shape_name}")
     return shape.contains_fn
 
 
-def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 5) -> List[str]:
-    names = all_shape_names(shape_dir)
+def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 5, orientation_mode: str = "original") -> List[str]:
+    names = all_shape_names(shape_dir, orientation_mode)
     if not names:
         return []
 
-    # First pass: every image exactly once.
     first = names.copy()
     rng.shuffle(first)
     out: List[str] = first[: min(total_pages, len(first))]
 
-    # Remaining pages: cycle all shapes before repeating again, while avoiding near repeats.
     while len(out) < total_pages:
         cycle = names.copy()
         rng.shuffle(cycle)
-        for name in cycle:
-            if len(out) >= total_pages:
-                break
-            if name in out[-min_gap:] and len(names) > min_gap:
-                continue
-            out.append(name)
+        out.extend(cycle)
 
     return out[:total_pages]
 
