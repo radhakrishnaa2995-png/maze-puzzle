@@ -172,6 +172,7 @@ def _add_loops(cells: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rng: random
 
 
 def maze_signature(maze: Maze) -> str:
+    """Stable signature for detecting duplicate maze layouts."""
     wall_bits = []
     for cell in sorted(maze.active_cells):
         w = maze.walls[cell]
