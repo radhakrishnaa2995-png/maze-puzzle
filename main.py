@@ -23,11 +23,13 @@ def main() -> None:
         cfg = json.load(fh)
 
     shape_dir = str(cfg.get("shape_dir", "assets/shapes"))
-    loaded = load_shapes(shape_dir)
+    orientation_mode = str(cfg.get("orientation_mode", "original"))
+
+    loaded = load_shapes(shape_dir, orientation_mode)
     if not loaded:
         raise RuntimeError(f"No usable shapes loaded from {shape_dir}")
-    shapes_count = len(all_shape_names(shape_dir))
 
+    shapes_count = len(all_shape_names(shape_dir, orientation_mode))
     configured_pages = int(cfg.get("pages_per_book", 0))
     pages = max(configured_pages, shapes_count)
 
@@ -40,6 +42,7 @@ def main() -> None:
         seed=seed,
         title="Maze Puzzle Book for Kids",
         shape_dir=shape_dir,
+        orientation_mode=orientation_mode,
     )
     print(f"Generated {out_path}")
 
