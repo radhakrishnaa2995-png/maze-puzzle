@@ -44,10 +44,10 @@ def _draw_page_background(c: canvas.Canvas, bg: colors.Color, page_no: int, titl
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
-    for _ in range(24):
+    for _ in range(20):
         pastel = rng.choice(PASTEL_PALETTE)
-        c.setFillColor(colors.Color(pastel.red, pastel.green, pastel.blue, alpha=0.30))
-        c.circle(rng.uniform(25, PAGE_W - 25), rng.uniform(25, PAGE_H - 25), rng.uniform(5, 18), stroke=0, fill=1)
+        c.setFillColor(colors.Color(pastel.red, pastel.green, pastel.blue, alpha=0.25))
+        c.circle(rng.uniform(25, PAGE_W - 25), rng.uniform(25, PAGE_H - 25), rng.uniform(5, 16), stroke=0, fill=1)
 
     c.setFillColor(colors.white)
     c.roundRect(20, 20, PAGE_W - 40, PAGE_H - 40, 22, fill=1, stroke=0)
@@ -86,29 +86,19 @@ def _draw_direction_arrow(c: canvas.Canvas, px: float, py: float, side: str, col
 def _difficulty_for_page(page_idx: int, total_pages: int) -> tuple[str, int, int, float]:
     ratio = page_idx / max(1, total_pages - 1)
     if ratio < 0.33:
-        return "Easy", 33, 33, 0.20
+        return "Easy", 35, 35, 0.20
     if ratio < 0.66:
-        return "Medium", 45, 45, 0.56
-    return "Hard", 59, 59, 0.9
+        return "Medium", 47, 47, 0.56
+    return "Hard", 61, 61, 0.9
 
 
-def _draw_maze(
-    c: canvas.Canvas,
-    maze: Maze,
-    frame_x: float,
-    frame_y: float,
-    frame_w: float,
-    frame_h: float,
-    show_solution: bool,
-    path: list[tuple[int, int]] | None,
-) -> None:
+def _draw_maze(c: canvas.Canvas, maze: Maze, frame_x: float, frame_y: float, frame_w: float, frame_h: float, show_solution: bool, path: list[tuple[int, int]] | None) -> None:
     min_r = min(r for r, _ in maze.active_cells)
     max_r = max(r for r, _ in maze.active_cells)
     min_c = min(c_ for _, c_ in maze.active_cells)
     max_c = max(c_ for _, c_ in maze.active_cells)
-
-    vis_rows = (max_r - min_r + 1)
-    vis_cols = (max_c - min_c + 1)
+    vis_rows = max_r - min_r + 1
+    vis_cols = max_c - min_c + 1
 
     cell = min(frame_w / vis_cols, frame_h / vis_rows)
     ox = frame_x + (frame_w - vis_cols * cell) / 2
@@ -120,19 +110,17 @@ def _draw_maze(
         local_c = cc - min_c
         x0 = ox + local_c * cell
         y0 = oy + (vis_rows - 1 - local_r) * cell
-        x1, y1 = x0 + cell, y0 + cell
-        return x0, y0, x1, y1
+        return x0, y0, x0 + cell, y0 + cell
 
-    c.setStrokeColor(colors.HexColor("#7A7A7A"))
-    c.setLineWidth(max(0.35, cell * 0.06))
+    c.setStrokeColor(colors.HexColor("#767676"))
+    c.setLineWidth(max(0.3, cell * 0.055))
     c.setLineCap(1)
 
-    outline_segments: list[tuple[float, float, float, float]] = []
-
+    outline: list[tuple[float, float, float, float]] = []
     for idx in maze.active_cells:
         r, col = idx
-        walls = maze.walls[idx]
         x0, y0, x1, y1 = box_for(idx)
+        walls = maze.walls[idx]
 
         if walls["N"]:
             c.line(x0, y1, x1, y1)
@@ -149,17 +137,17 @@ def _draw_maze(
         rt = (r, col + 1) not in maze.active_cells
 
         if up and not (idx == maze.start and maze.start_open_side == "N") and not (idx == maze.end and maze.end_open_side == "N"):
-            outline_segments.append((x0, y1, x1, y1))
+            outline.append((x0, y1, x1, y1))
         if dn and not (idx == maze.start and maze.start_open_side == "S") and not (idx == maze.end and maze.end_open_side == "S"):
-            outline_segments.append((x0, y0, x1, y0))
+            outline.append((x0, y0, x1, y0))
         if lf and not (idx == maze.start and maze.start_open_side == "W") and not (idx == maze.end and maze.end_open_side == "W"):
-            outline_segments.append((x0, y0, x0, y1))
+            outline.append((x0, y0, x0, y1))
         if rt and not (idx == maze.start and maze.start_open_side == "E") and not (idx == maze.end and maze.end_open_side == "E"):
-            outline_segments.append((x1, y0, x1, y1))
+            outline.append((x1, y0, x1, y1))
 
     c.setStrokeColor(colors.HexColor("#101010"))
-    c.setLineWidth(max(1.4, cell * 0.14))
-    for x0, y0, x1, y1 in outline_segments:
+    c.setLineWidth(max(1.3, cell * 0.13))
+    for x0, y0, x1, y1 in outline:
         c.line(x0, y0, x1, y1)
 
     for marker_cell, side, col in [
@@ -179,7 +167,7 @@ def _draw_maze(
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#E11D48"))
-        c.setLineWidth(max(1.5, cell * 0.16))
+        c.setLineWidth(max(1.4, cell * 0.15))
         pts = []
         for rr, cc in path:
             x0, y0, _, _ = box_for((rr, cc))
@@ -188,12 +176,12 @@ def _draw_maze(
             c.line(*pts[i], *pts[i + 1])
 
 
-def build_book(output_file: str, pages: int, seed: int, title: str) -> None:
+def build_book(output_file: str, pages: int, seed: int, title: str, shape_dir: str = "assets/shapes") -> None:
     rng = random.Random(seed)
     c = canvas.Canvas(output_file, pagesize=A4)
 
-    shape_order = shape_sequence(pages, rng, min_gap=3)
-    bg_order = palette_sequence((pages * 2) + 3, PASTEL_PALETTE, rng)
+    shape_order = shape_sequence(pages, rng, shape_dir=shape_dir, min_gap=3)
+    bg_order = palette_sequence((pages * 2) + 2, PASTEL_PALETTE, rng)
 
     puzzles: List[PuzzlePage] = []
 
@@ -204,7 +192,7 @@ def build_book(output_file: str, pages: int, seed: int, title: str) -> None:
         difficulty, rows, cols, diff = _difficulty_for_page(page - 1, pages)
         shape = shape_order[page - 1]
 
-        maze = generate_maze(rows=rows, cols=cols, shape=shape, difficulty_factor=diff, rng=rng)
+        maze = generate_maze(rows=rows, cols=cols, shape=shape, difficulty_factor=diff, rng=rng, shape_dir=shape_dir)
         maze.difficulty = difficulty
         solution = solve_maze(maze)
         puzzles.append(PuzzlePage(page, maze, solution))
@@ -217,13 +205,13 @@ def build_book(output_file: str, pages: int, seed: int, title: str) -> None:
 
         c.setFillColor(colors.HexColor("#0f172a"))
         c.setFont("Helvetica-Bold", 18)
-        c.drawString(36, PAGE_H - 114, f"{shape}-Shaped Maze")
+        c.drawString(36, PAGE_H - 114, f"{shape} Maze")
 
         c.setFillColor(colors.HexColor("#475569"))
         c.setFont("Helvetica", 11)
         c.drawRightString(PAGE_W - 36, PAGE_H - 111, "Green arrow = start, red arrow = finish")
 
-        _draw_maze(c, maze, frame_x=34, frame_y=74, frame_w=PAGE_W - 68, frame_h=PAGE_H - 164, show_solution=False, path=None)
+        _draw_maze(c, maze, frame_x=36, frame_y=74, frame_w=PAGE_W - 72, frame_h=PAGE_H - 164, show_solution=False, path=None)
         c.showPage()
 
     for i, puzzle in enumerate(puzzles, start=1):
@@ -238,13 +226,13 @@ def build_book(output_file: str, pages: int, seed: int, title: str) -> None:
 
         c.setFillColor(colors.HexColor("#0f172a"))
         c.setFont("Helvetica-Bold", 18)
-        c.drawString(36, PAGE_H - 114, f"{puzzle.maze.shape}-Shaped Maze")
+        c.drawString(36, PAGE_H - 114, f"{puzzle.maze.shape} Maze")
 
         c.setFillColor(colors.HexColor("#64748b"))
         c.setFont("Helvetica", 11)
         c.drawString(36, PAGE_H - 129, "Correct route is highlighted in red.")
 
-        _draw_maze(c, puzzle.maze, frame_x=34, frame_y=74, frame_w=PAGE_W - 68, frame_h=PAGE_H - 164, show_solution=True, path=puzzle.solution)
+        _draw_maze(c, puzzle.maze, frame_x=36, frame_y=74, frame_w=PAGE_W - 72, frame_h=PAGE_H - 164, show_solution=True, path=puzzle.solution)
         c.showPage()
 
     c.save()
