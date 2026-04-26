@@ -9,7 +9,7 @@ import secrets
 import time
 
 from pdf_builder import build_book
-from shapes import all_shape_names
+from shapes import all_shape_names, load_shapes
 
 OUTPUT_DIR = "output"
 CONFIG_FILE = "config.json"
@@ -23,6 +23,9 @@ def main() -> None:
         cfg = json.load(fh)
 
     shape_dir = str(cfg.get("shape_dir", "assets/shapes"))
+    loaded = load_shapes(shape_dir)
+    if not loaded:
+        raise RuntimeError(f"No usable shapes loaded from {shape_dir}")
     shapes_count = len(all_shape_names(shape_dir))
 
     configured_pages = int(cfg.get("pages_per_book", 0))
