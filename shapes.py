@@ -1,3 +1,4 @@
+# shapes.py
 """Load shape silhouettes from PNG/SVG/JPG and expose robust mask utilities."""
 
 from __future__ import annotations
@@ -252,7 +253,59 @@ def _preprocess_outline_mask(mask: np.ndarray, scale: int = 4) -> np.ndarray:
     return arr
 
 
+def _orient_mask(mask: np.ndarray, name: str) -> np.ndarray:
+    lname = name.lower()
+    if mask.size == 0:
+        return mask
+
+    # basic stats helpers
+    def edge_density(arr: np.ndarray, side: str, span: int = 8) -> float:
+        span = min(span, arr.shape[1] // 3 if arr.shape[1] >= 3 else 1)
+        if side == "left":
+            blk = arr[:, :span]
+        else:
+            blk = arr[:, -span:]
+        return float(blk.sum()) / max(1, blk.size)
+
+    def band_density(arr: np.ndarray, where: str, span: int = 10) -> float:
+        span = min(span, arr.shape[0] // 3 if arr.shape[0] >= 3 else 1)
+        if where == "top":
+            blk = arr[:span, :]
+        else:
+            blk = arr[-span:, :]
+        return float(blk.sum()) / max(1, blk.size)
+
+    # Horizontal orientation rules
+    if any(k in lname for k in ["dinosaur", "fish", "cat"]):
+        left = edge_density(mask, "left")
+        right = edge_density(mask, "right")
+        if right < left:
+            mask = np.fliplr(mask)
+
+    if "bird" in lname:
+        left = edge_density(mask, "left")
+        right = edge_density(mask, "right")
+        if right > left:
+            mask = np.fliplr(mask)
+
+    # Vertical orientation rules
+    if "rocket" in lname:
+        top = band_density(mask, "top")
+        bottom = band_density(mask, "bottom")
+        if top >= bottom:
+            mask = np.flipud(mask)
+
+    if "heart" in lname or "butterfly" in lname:
+        top = band_density(mask, "top")
+        bottom = band_density(mask, "bottom")
+        if top < bottom:
+            mask = np.flipud(mask)
+
+    return mask
+
+
 def _build_raster_contains(image_path: Path) -> MaskFn:
+    shape_name = image_path.stem
     img = Image.open(image_path).convert("RGBA")
     arr = np.array(img)
     alpha = arr[:, :, 3]
@@ -265,6 +318,7 @@ def _build_raster_contains(image_path: Path) -> MaskFn:
         base = gray < 235
 
     base = _preprocess_outline_mask(base)
+    base = _orient_mask(base, shape_name)
     ys, xs = np.where(base)
     if len(xs) == 0:
         raise ValueError(f"No silhouette detected in image: {image_path}")
@@ -281,8 +335,10 @@ def _build_raster_contains(image_path: Path) -> MaskFn:
 
 
 def _build_svg_contains(svg_path: Path) -> MaskFn:
+    shape_name = svg_path.stem
     base = _draw_svg_outline_to_mask(svg_path)
     processed = _preprocess_outline_mask(base)
+    processed = _orient_mask(processed, shape_name)
     ys, xs = np.where(processed)
     if len(xs) == 0:
         raise ValueError(f"No silhouette detected in SVG: {svg_path}")
