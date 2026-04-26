@@ -11,11 +11,11 @@ Cell = Tuple[int, int]
 
 
 def solve_maze(maze: Maze) -> List[Cell]:
-    q = deque([maze.start])
+    queue = deque([maze.start])
     parent: Dict[Cell, Cell | None] = {maze.start: None}
 
-    while q:
-        cur = q.popleft()
+    while queue:
+        cur = queue.popleft()
         if cur == maze.end:
             break
 
@@ -26,7 +26,7 @@ def solve_maze(maze: Maze) -> List[Cell]:
             nxt = (r + dr, c + dc)
             if nxt in maze.active_cells and nxt not in parent:
                 parent[nxt] = cur
-                q.append(nxt)
+                queue.append(nxt)
 
     if maze.end not in parent:
         return []
