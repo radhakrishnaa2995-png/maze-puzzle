@@ -21,8 +21,8 @@ PAGE_W, PAGE_H = A4
 
 SAFE_LEFT = 1.0 * inch
 SAFE_RIGHT = 1.0 * inch
-SAFE_TOP = 0.9 * inch
-SAFE_BOTTOM = 0.9 * inch
+SAFE_TOP = 0.8 * inch
+SAFE_BOTTOM = 0.8 * inch
 
 PASTEL_PALETTE = [
     colors.HexColor("#FCE7F3"),
@@ -195,11 +195,11 @@ def _title_bar(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficult
     c.roundRect(bar_x, bar_y, bar_w, bar_h, 10, fill=1, stroke=0)
 
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 14)
+    c.setFont("Helvetica-Bold", 15)
     c.drawString(bar_x + 12, bar_y + 20, f"Puzzle {puzzle_no} • {difficulty}")
 
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 19)
+    c.setFont("Helvetica-Bold", 20)
     c.drawString(bar_x, bar_y - 26, f"{shape} Maze")
 
     c.setFillColor(colors.HexColor("#475569"))
