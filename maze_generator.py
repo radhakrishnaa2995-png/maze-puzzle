@@ -7,7 +7,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple
 
-from shapes import mask_for_shape
+from shapes import all_shape_names, mask_for_shape
 
 Cell = Tuple[int, int]
 
@@ -187,7 +187,14 @@ def generate_maze(
     rng: random.Random,
     shape_dir: str = "assets/shapes",
 ) -> Maze:
-    shape_fn = mask_for_shape(shape, shape_dir=shape_dir)
+    try:
+        shape_fn = mask_for_shape(shape, shape_dir=shape_dir)
+    except KeyError:
+        available = all_shape_names(shape_dir)
+        if not available:
+            raise
+        shape = available[0]
+        shape_fn = mask_for_shape(shape, shape_dir=shape_dir)
     rows, cols, cells = _adapt_grid(rows, cols, shape_fn)
 
     if len(cells) < 12:
