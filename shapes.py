@@ -289,14 +289,43 @@ def _load_single_svg(svg_path: Path) -> SVGShape:
     )
 
 
-@lru_cache(maxsize=4)
-def load_svg_shapes(shape_dir: str = "assets/shapes") -> tuple[SVGShape, ...]:
+def _discover_svg_files(shape_dir: str) -> list[Path]:
     root = Path(shape_dir)
-    if not root.exists():
-        raise FileNotFoundError(f"Shape directory not found: {shape_dir}")
-    files = sorted(root.glob("*.svg"))
+    files: list[Path] = []
+
+    if root.exists():
+        files.extend(sorted(root.glob("*.svg")))
+        if not files:
+            files.extend(sorted(root.rglob("*.svg")))
+
+    # Fallback discovery for CI/repo layout differences.
     if not files:
-        raise FileNotFoundError(f"No SVG files found in: {shape_dir}")
+        repo_root = Path.cwd()
+        for candidate in [repo_root / "assets", repo_root / "shapes", repo_root]:
+            if candidate.exists():
+                files.extend(sorted(candidate.rglob("*.svg")))
+            if files:
+                break
+
+    # Deduplicate while preserving order.
+    seen = set()
+    deduped = []
+    for f in files:
+        key = str(f.resolve())
+        if key not in seen:
+            seen.add(key)
+            deduped.append(f)
+    return deduped
+
+
+@lru_cache(maxsize=8)
+def load_svg_shapes(shape_dir: str = "assets/shapes") -> tuple[SVGShape, ...]:
+    files = _discover_svg_files(shape_dir)
+    if not files:
+        raise FileNotFoundError(
+            "No SVG files found. Checked: "
+            f"'{shape_dir}', '{Path.cwd() / 'assets'}', '{Path.cwd() / 'shapes'}', and repository root recursively."
+        )
     return tuple(_load_single_svg(f) for f in files)
 
 
