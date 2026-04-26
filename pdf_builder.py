@@ -1,3 +1,4 @@
+# pdf_builder.py
 """PDF composition for printable maze books."""
 
 from __future__ import annotations
