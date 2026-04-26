@@ -217,8 +217,13 @@ def _parse_points_attr(raw: str) -> list[tuple[float, float]]:
 
 
 def _collect_polygons(svg_path: Path) -> list[list[tuple[float, float]]]:
-    tree = ET.parse(svg_path)
-    root = tree.getroot()
+    raw = svg_path.read_bytes()
+    text = raw.decode("utf-8-sig", errors="ignore")
+    start_idx = text.find("<")
+    if start_idx > 0:
+        text = text[start_idx:]
+
+    root = ET.fromstring(text)
     ns = "{http://www.w3.org/2000/svg}"
 
     polys: list[list[tuple[float, float]]] = []
@@ -326,7 +331,19 @@ def load_svg_shapes(shape_dir: str = "assets/shapes") -> tuple[SVGShape, ...]:
             "No SVG files found. Checked: "
             f"'{shape_dir}', '{Path.cwd() / 'assets'}', '{Path.cwd() / 'shapes'}', and repository root recursively."
         )
-    return tuple(_load_single_svg(f) for f in files)
+
+    loaded: list[SVGShape] = []
+    for f in files:
+        try:
+            loaded.append(_load_single_svg(f))
+        except Exception:
+            # Skip malformed/non-XML files with .svg extension.
+            continue
+
+    if not loaded:
+        raise ValueError("SVG files were found, but none could be parsed as valid shape outlines.")
+
+    return tuple(loaded)
 
 
 def all_shape_names(shape_dir: str = "assets/shapes") -> List[str]:
