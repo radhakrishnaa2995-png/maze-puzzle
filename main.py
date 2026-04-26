@@ -1,3 +1,4 @@
+# main.py
 """Entry point for generating multiple maze puzzle books."""
 
 from __future__ import annotations
