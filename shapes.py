@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable, Iterable, List
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 
 MaskFn = Callable[[float, float], bool]
 _ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".svg"}
@@ -55,10 +55,10 @@ def _fill_holes(mask: np.ndarray) -> np.ndarray:
 
 
 def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
-    # Preserve orientation. Only strengthen thin outlines and fill interiors.
+    # Preserve orientation; only strengthen outline and fill interior.
     img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
-    img = img.filter(ImageFilter.MaxFilter(size=5))  # thicken lines
-    img = img.filter(ImageFilter.MaxFilter(size=5))  # close small gaps
+    img = img.filter(ImageFilter.MaxFilter(size=5))
+    img = img.filter(ImageFilter.MaxFilter(size=5))
     img = img.filter(ImageFilter.MinFilter(size=3))
 
     arr = np.array(img) > 0
@@ -71,17 +71,12 @@ def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
 
 
 def _raster_mask(path: Path) -> np.ndarray:
-    # 1. open, 2. grayscale, 3-4 detect dark object + remove white bg
-    img = Image.open(path).convert("RGBA")
+    img = ImageOps.exif_transpose(Image.open(path)).convert("RGBA")
     rgba = np.array(img)
     alpha = rgba[:, :, 3]
-
     gray = np.array(img.convert("L"), dtype=np.uint8)
 
-    # Dark foreground for line-art; transparent regions excluded.
     foreground = (gray < 235) & (alpha > 8)
-
-    # If image has no transparency and weak contrast, use adaptive threshold fallback.
     if foreground.sum() < max(20, gray.size // 500):
         cutoff = int(np.percentile(gray, 75))
         foreground = gray < min(245, cutoff)
@@ -90,7 +85,6 @@ def _raster_mask(path: Path) -> np.ndarray:
 
 
 def _svg_mask(path: Path, size: int = 512) -> np.ndarray:
-    # Attempt rasterization via Pillow plugin support.
     try:
         img = Image.open(path).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
         rgba = np.array(img)
@@ -102,7 +96,6 @@ def _svg_mask(path: Path, size: int = 512) -> np.ndarray:
     except Exception:
         pass
 
-    # Lightweight fallback for unsupported SVG decoding.
     text = path.read_text(encoding="utf-8", errors="ignore").lower()
     canvas = Image.new("L", (size, size), 0)
     from PIL import ImageDraw
@@ -154,7 +147,7 @@ def load_shapes(shape_dir: str = "assets/shapes") -> tuple[LoadedShape, ...]:
     loaded: list[LoadedShape] = []
 
     for path in files:
-        name = path.stem.replace("_", " ").title()
+        name = path.stem.replace("_", " ").replace("-", " ").title()
         try:
             raw = _svg_mask(path) if path.suffix.lower() == ".svg" else _raster_mask(path)
             loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(raw)))
@@ -179,23 +172,27 @@ def mask_for_shape(shape_name: str, shape_dir: str = "assets/shapes") -> MaskFn:
     return shape.contains_fn
 
 
-def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 2) -> List[str]:
+def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 5) -> List[str]:
     names = all_shape_names(shape_dir)
     if not names:
         return []
 
-    out: List[str] = []
+    # First pass: every image exactly once.
+    first = names.copy()
+    rng.shuffle(first)
+    out: List[str] = first[: min(total_pages, len(first))]
+
+    # Remaining pages: cycle all shapes before repeating again, while avoiding near repeats.
     while len(out) < total_pages:
         cycle = names.copy()
         rng.shuffle(cycle)
         for name in cycle:
             if len(out) >= total_pages:
                 break
-            if out and name == out[-1] and len(names) > 1:
-                continue
             if name in out[-min_gap:] and len(names) > min_gap:
                 continue
             out.append(name)
+
     return out[:total_pages]
 
 
