@@ -1,5 +1,5 @@
 # solver.py
-"""Maze solver utilities."""
+"""Maze solver utilities (BFS shortest-path on carved maze graph)."""
 
 from __future__ import annotations
 
