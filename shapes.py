@@ -1,215 +1,333 @@
-"""Creative child-friendly shape masks for maze silhouettes."""
+"""Load SVG silhouettes and expose mask utilities for maze generation.
+
+This module intentionally avoids non-standard binary dependencies so it works in
+restricted CI/runtime environments.
+"""
 
 from __future__ import annotations
 
 import math
 import random
+import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Callable, Iterable, List
 
 MaskFn = Callable[[float, float], bool]
+_TOKEN_RE = re.compile(r"[A-Za-z]|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
 
 
 @dataclass(frozen=True)
-class ShapeTemplate:
+class SVGShape:
     name: str
-    mask: MaskFn
+    polygons: tuple[tuple[tuple[float, float], ...], ...]
+    min_x: float
+    min_y: float
+    max_x: float
+    max_y: float
+
+    @property
+    def center(self) -> tuple[float, float]:
+        return ((self.min_x + self.max_x) / 2, (self.min_y + self.max_y) / 2)
+
+    @property
+    def extent(self) -> float:
+        return max(1e-9, max(self.max_x - self.min_x, self.max_y - self.min_y))
 
 
-def _circle(cx: float, cy: float, r: float) -> MaskFn:
-    return lambda x, y: (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
 
 
-def _ellipse(cx: float, cy: float, rx: float, ry: float, rot: float = 0.0) -> MaskFn:
-    c, s = math.cos(rot), math.sin(rot)
-
-    def fn(x: float, y: float) -> bool:
-        tx, ty = x - cx, y - cy
-        xr = tx * c + ty * s
-        yr = -tx * s + ty * c
-        return (xr * xr) / (rx * rx + 1e-9) + (yr * yr) / (ry * ry + 1e-9) <= 1
-
-    return fn
-
-
-def _rect(cx: float, cy: float, w: float, h: float) -> MaskFn:
-    return lambda x, y: abs(x - cx) <= w / 2 and abs(y - cy) <= h / 2
-
-
-def _polygon(points: list[tuple[float, float]]) -> MaskFn:
-    def fn(x: float, y: float) -> bool:
-        inside = False
-        j = len(points) - 1
-        for i, (xi, yi) in enumerate(points):
-            xj, yj = points[j]
-            if (yi > y) != (yj > y):
-                x_inter = (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi
-                if x < x_inter:
-                    inside = not inside
-            j = i
-        return inside
-
-    return fn
-
-
-def _star(cx: float, cy: float, r_outer: float, r_inner: float) -> MaskFn:
+def _sample_cubic(p0, p1, p2, p3, n=20):
     pts = []
-    for i in range(10):
-        a = -math.pi / 2 + i * math.pi / 5
-        r = r_outer if i % 2 == 0 else r_inner
-        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-    return _polygon(pts)
+    for i in range(1, n + 1):
+        t = i / n
+        mt = 1 - t
+        x = (mt**3) * p0[0] + 3 * (mt**2) * t * p1[0] + 3 * mt * (t**2) * p2[0] + (t**3) * p3[0]
+        y = (mt**3) * p0[1] + 3 * (mt**2) * t * p1[1] + 3 * mt * (t**2) * p2[1] + (t**3) * p3[1]
+        pts.append((x, y))
+    return pts
 
 
-def _heart(scale: float = 1.0, shift_y: float = 0.02) -> MaskFn:
+def _sample_quadratic(p0, p1, p2, n=16):
+    pts = []
+    for i in range(1, n + 1):
+        t = i / n
+        mt = 1 - t
+        x = (mt**2) * p0[0] + 2 * mt * t * p1[0] + (t**2) * p2[0]
+        y = (mt**2) * p0[1] + 2 * mt * t * p1[1] + (t**2) * p2[1]
+        pts.append((x, y))
+    return pts
+
+
+def _parse_path_to_polylines(path_d: str) -> list[list[tuple[float, float]]]:
+    tokens = _TOKEN_RE.findall(path_d)
+    i = 0
+    cmd = None
+    cur = (0.0, 0.0)
+    start = (0.0, 0.0)
+    polylines: list[list[tuple[float, float]]] = []
+    current_line: list[tuple[float, float]] = []
+    prev_ctrl = None
+
+    def read_float() -> float:
+        nonlocal i
+        v = float(tokens[i])
+        i += 1
+        return v
+
+    while i < len(tokens):
+        token = tokens[i]
+        if token.isalpha():
+            cmd = token
+            i += 1
+        elif cmd is None:
+            raise ValueError("Invalid SVG path: missing command")
+
+        assert cmd is not None
+        rel = cmd.islower()
+        op = cmd.upper()
+
+        if op == "M":
+            x = read_float()
+            y = read_float()
+            if rel:
+                x += cur[0]
+                y += cur[1]
+            cur = (x, y)
+            start = cur
+            if current_line:
+                polylines.append(current_line)
+            current_line = [cur]
+            prev_ctrl = None
+            # chained coordinates after M are treated as L
+            cmd = "l" if rel else "L"
+
+        elif op == "L":
+            x = read_float()
+            y = read_float()
+            if rel:
+                x += cur[0]
+                y += cur[1]
+            cur = (x, y)
+            current_line.append(cur)
+            prev_ctrl = None
+
+        elif op == "H":
+            x = read_float()
+            if rel:
+                x += cur[0]
+            cur = (x, cur[1])
+            current_line.append(cur)
+            prev_ctrl = None
+
+        elif op == "V":
+            y = read_float()
+            if rel:
+                y += cur[1]
+            cur = (cur[0], y)
+            current_line.append(cur)
+            prev_ctrl = None
+
+        elif op == "C":
+            x1, y1, x2, y2, x, y = read_float(), read_float(), read_float(), read_float(), read_float(), read_float()
+            if rel:
+                x1, y1 = x1 + cur[0], y1 + cur[1]
+                x2, y2 = x2 + cur[0], y2 + cur[1]
+                x, y = x + cur[0], y + cur[1]
+            pts = _sample_cubic(cur, (x1, y1), (x2, y2), (x, y))
+            current_line.extend(pts)
+            cur = (x, y)
+            prev_ctrl = (x2, y2)
+
+        elif op == "S":
+            x2, y2, x, y = read_float(), read_float(), read_float(), read_float()
+            if prev_ctrl is None:
+                x1, y1 = cur
+            else:
+                x1, y1 = (2 * cur[0] - prev_ctrl[0], 2 * cur[1] - prev_ctrl[1])
+            if rel:
+                x2, y2 = x2 + cur[0], y2 + cur[1]
+                x, y = x + cur[0], y + cur[1]
+            pts = _sample_cubic(cur, (x1, y1), (x2, y2), (x, y))
+            current_line.extend(pts)
+            cur = (x, y)
+            prev_ctrl = (x2, y2)
+
+        elif op == "Q":
+            x1, y1, x, y = read_float(), read_float(), read_float(), read_float()
+            if rel:
+                x1, y1 = x1 + cur[0], y1 + cur[1]
+                x, y = x + cur[0], y + cur[1]
+            pts = _sample_quadratic(cur, (x1, y1), (x, y))
+            current_line.extend(pts)
+            cur = (x, y)
+            prev_ctrl = (x1, y1)
+
+        elif op == "T":
+            x, y = read_float(), read_float()
+            if prev_ctrl is None:
+                x1, y1 = cur
+            else:
+                x1, y1 = (2 * cur[0] - prev_ctrl[0], 2 * cur[1] - prev_ctrl[1])
+            if rel:
+                x, y = x + cur[0], y + cur[1]
+            pts = _sample_quadratic(cur, (x1, y1), (x, y))
+            current_line.extend(pts)
+            cur = (x, y)
+            prev_ctrl = (x1, y1)
+
+        elif op == "Z":
+            if current_line and current_line[-1] != start:
+                current_line.append(start)
+            if current_line:
+                polylines.append(current_line)
+            current_line = []
+            cur = start
+            prev_ctrl = None
+
+        elif op == "A":
+            # Arc support fallback: draw as straight line to end point.
+            _ = [read_float() for _ in range(5)]
+            x, y = read_float(), read_float()
+            if rel:
+                x += cur[0]
+                y += cur[1]
+            cur = (x, y)
+            current_line.append(cur)
+            prev_ctrl = None
+
+        else:
+            raise ValueError(f"Unsupported SVG path command: {cmd}")
+
+    if current_line:
+        polylines.append(current_line)
+    return polylines
+
+
+def _parse_points_attr(raw: str) -> list[tuple[float, float]]:
+    nums = [float(n) for n in re.split(r"[ ,]+", raw.strip()) if n]
+    pts = list(zip(nums[0::2], nums[1::2]))
+    if pts and pts[0] != pts[-1]:
+        pts.append(pts[0])
+    return pts
+
+
+def _collect_polygons(svg_path: Path) -> list[list[tuple[float, float]]]:
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+    ns = "{http://www.w3.org/2000/svg}"
+
+    polys: list[list[tuple[float, float]]] = []
+
+    for elem in root.iter():
+        tag = elem.tag
+        if tag == f"{ns}path" and elem.get("d"):
+            polys.extend(_parse_path_to_polylines(elem.get("d", "")))
+        elif tag == f"{ns}polygon" and elem.get("points"):
+            polys.append(_parse_points_attr(elem.get("points", "")))
+        elif tag == f"{ns}rect":
+            x = float(elem.get("x", "0"))
+            y = float(elem.get("y", "0"))
+            w = float(elem.get("width", "0"))
+            h = float(elem.get("height", "0"))
+            pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)]
+            polys.append(pts)
+        elif tag == f"{ns}circle":
+            cx = float(elem.get("cx", "0"))
+            cy = float(elem.get("cy", "0"))
+            r = float(elem.get("r", "0"))
+            pts = [(cx + math.cos(2 * math.pi * t / 72) * r, cy + math.sin(2 * math.pi * t / 72) * r) for t in range(73)]
+            polys.append(pts)
+        elif tag == f"{ns}ellipse":
+            cx = float(elem.get("cx", "0"))
+            cy = float(elem.get("cy", "0"))
+            rx = float(elem.get("rx", "0"))
+            ry = float(elem.get("ry", "0"))
+            pts = [(cx + math.cos(2 * math.pi * t / 72) * rx, cy + math.sin(2 * math.pi * t / 72) * ry) for t in range(73)]
+            polys.append(pts)
+
+    return [p for p in polys if len(p) >= 3]
+
+
+def _bounds(polygons: list[list[tuple[float, float]]]) -> tuple[float, float, float, float]:
+    xs = [x for poly in polygons for x, _ in poly]
+    ys = [y for poly in polygons for _, y in poly]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _point_in_poly(x: float, y: float, poly: tuple[tuple[float, float], ...]) -> bool:
+    inside = False
+    j = len(poly) - 1
+    for i, (xi, yi) in enumerate(poly):
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y):
+            x_inter = (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
+            if x < x_inter:
+                inside = not inside
+        j = i
+    return inside
+
+
+def _load_single_svg(svg_path: Path) -> SVGShape:
+    polys = _collect_polygons(svg_path)
+    if not polys:
+        raise ValueError(f"No supported shape elements found in {svg_path}")
+
+    min_x, min_y, max_x, max_y = _bounds(polys)
+    packed = tuple(tuple(p) for p in polys)
+    return SVGShape(
+        name=svg_path.stem.replace("_", " ").title(),
+        polygons=packed,
+        min_x=min_x,
+        min_y=min_y,
+        max_x=max_x,
+        max_y=max_y,
+    )
+
+
+@lru_cache(maxsize=4)
+def load_svg_shapes(shape_dir: str = "assets/shapes") -> tuple[SVGShape, ...]:
+    root = Path(shape_dir)
+    if not root.exists():
+        raise FileNotFoundError(f"Shape directory not found: {shape_dir}")
+    files = sorted(root.glob("*.svg"))
+    if not files:
+        raise FileNotFoundError(f"No SVG files found in: {shape_dir}")
+    return tuple(_load_single_svg(f) for f in files)
+
+
+def all_shape_names(shape_dir: str = "assets/shapes") -> List[str]:
+    return [s.name for s in load_svg_shapes(shape_dir)]
+
+
+def mask_for_shape(shape_name: str, shape_dir: str = "assets/shapes") -> MaskFn:
+    shape = next((s for s in load_svg_shapes(shape_dir) if s.name == shape_name), None)
+    if shape is None:
+        raise KeyError(f"Unknown shape name: {shape_name}")
+
+    cx, cy = shape.center
+    scale = shape.extent / 2
+
     def fn(x: float, y: float) -> bool:
-        sx = x / max(0.1, scale)
-        sy = (y - shift_y) / max(0.1, scale)
-        return (sx * sx + sy * sy - 1) ** 3 - sx * sx * sy**3 <= 0 and sy <= 1.05
+        px = cx + x * scale
+        py = cy + y * scale
+        # odd-even rule across all SVG paths/polygons
+        toggles = 0
+        for poly in shape.polygons:
+            if _point_in_poly(px, py, poly):
+                toggles ^= 1
+        return toggles == 1
 
     return fn
 
 
-def _union(parts: Iterable[MaskFn]) -> MaskFn:
-    parts = list(parts)
-    return lambda x, y: any(p(x, y) for p in parts)
-
-
-def _build_templates(rng: random.Random) -> List[ShapeTemplate]:
-    j = lambda s=0.03: rng.uniform(-s, s)
-    templates: List[ShapeTemplate] = []
-
-    # Dinosaur (triceratops-like profile)
-    dino_outline = _polygon(
-        [
-            (-0.95, 0.15), (-0.82, 0.26), (-0.66, 0.24), (-0.54, 0.38), (-0.30, 0.44),
-            (-0.05, 0.48), (0.24, 0.42), (0.48, 0.28), (0.64, 0.16), (0.88, 0.08),
-            (0.96, -0.02), (0.82, -0.08), (0.56, -0.12), (0.52, -0.32), (0.40, -0.52),
-            (0.20, -0.50), (0.14, -0.24), (-0.10, -0.24), (-0.16, -0.54), (-0.34, -0.54),
-            (-0.44, -0.30), (-0.62, -0.20), (-0.84, -0.10), (-0.96, 0.02),
-        ]
-    )
-    horn = _polygon([(-0.94, 0.24), (-1.02, 0.34), (-0.90, 0.33)])
-    templates.append(ShapeTemplate("Dinosaur", _union([dino_outline, horn])))
-
-    rocket = _union([
-        _ellipse(0.0, 0.02, 0.33 + j(0.02), 0.70 + j(0.03)),
-        _polygon([(0.0, 0.98), (-0.20, 0.58), (0.20, 0.58)]),
-        _polygon([(-0.32, -0.14), (-0.60, -0.42), (-0.18, -0.36)]),
-        _polygon([(0.32, -0.14), (0.60, -0.42), (0.18, -0.36)]),
-        _polygon([(-0.10, -0.66), (0.10, -0.66), (0.0, -0.98)]),
-    ])
-    templates.append(ShapeTemplate("Rocket", rocket))
-
-    animal = _union([
-        _ellipse(-0.06, -0.04, 0.56, 0.31), _circle(0.40, 0.16, 0.19),
-        _polygon([(0.28, 0.28), (0.36, 0.54), (0.46, 0.30)]),
-        _polygon([(0.44, 0.30), (0.58, 0.54), (0.58, 0.28)]),
-        _rect(-0.30, -0.46, 0.14, 0.30), _rect(-0.02, -0.46, 0.14, 0.30), _rect(0.24, -0.46, 0.14, 0.30),
-        _ellipse(-0.58, 0.18, 0.28, 0.08, rot=0.8),
-    ])
-    templates.append(ShapeTemplate("Animal", animal))
-
-    templates.append(ShapeTemplate("Butterfly", _union([
-        _ellipse(-0.35, 0.22, 0.33, 0.30), _ellipse(0.35, 0.22, 0.33, 0.30),
-        _ellipse(-0.30, -0.30, 0.35, 0.25), _ellipse(0.30, -0.30, 0.35, 0.25),
-        _rect(0.0, -0.02, 0.16, 0.76),
-    ])))
-
-    templates.append(ShapeTemplate("Fish", _union([
-        _ellipse(-0.10, -0.02, 0.62, 0.36), _polygon([(0.48, 0.0), (0.96, 0.34), (0.96, -0.34)]),
-        _polygon([(-0.12, 0.34), (0.14, 0.66), (0.22, 0.30)]),
-    ])))
-
-    train = _union([
-        _rect(-0.08, -0.08, 1.60, 0.50),
-        _rect(0.52, 0.18, 0.42, 0.34),
-        _rect(0.64, 0.44, 0.16, 0.20),
-        _circle(-0.62, -0.38, 0.17), _circle(-0.20, -0.38, 0.17), _circle(0.24, -0.38, 0.17), _circle(0.66, -0.38, 0.17),
-    ])
-    templates.append(ShapeTemplate("Train", train))
-
-    car = _union([
-        _rect(0.0, -0.16, 1.46, 0.46),
-        _polygon([(-0.58, 0.04), (-0.24, 0.34), (0.34, 0.34), (0.62, 0.04)]),
-        _circle(-0.44, -0.36, 0.20), _circle(0.44, -0.36, 0.20),
-    ])
-    templates.append(ShapeTemplate("Car", car))
-
-    castle = _union([
-        _rect(0.0, -0.06, 1.36, 0.76), _rect(-0.54, 0.34, 0.30, 0.48), _rect(0.54, 0.34, 0.30, 0.48),
-        _rect(-0.26, 0.44, 0.14, 0.16), _rect(0.0, 0.44, 0.14, 0.16), _rect(0.26, 0.44, 0.14, 0.16),
-    ])
-    templates.append(ShapeTemplate("Castle", castle))
-
-    templates.append(ShapeTemplate("Tree", _union([
-        _rect(0.0, -0.56, 0.28, 0.60), _circle(0.0, 0.14, 0.45), _circle(-0.32, 0.04, 0.30), _circle(0.32, 0.04, 0.30), _circle(0.0, 0.42, 0.28),
-    ])))
-
-    templates.append(ShapeTemplate("Flower", _union([
-        _circle(0.0, 0.10, 0.24), _circle(0.0, 0.50, 0.22), _circle(0.0, -0.30, 0.22),
-        _circle(-0.40, 0.10, 0.22), _circle(0.40, 0.10, 0.22), _circle(-0.30, 0.36, 0.20), _circle(0.30, 0.36, 0.20),
-        _rect(0.0, -0.64, 0.12, 0.46),
-    ])))
-
-    templates.append(ShapeTemplate("Ice Cream", _union([
-        _circle(-0.20, 0.34, 0.27), _circle(0.20, 0.34, 0.27), _circle(0.0, 0.52, 0.26), _polygon([(-0.30, 0.14), (0.30, 0.14), (0.0, -0.92)]),
-    ])))
-
-    templates.append(ShapeTemplate("Balloon", _union([
-        _ellipse(0.0, 0.20, 0.44, 0.56), _polygon([(-0.08, -0.30), (0.08, -0.30), (0.0, -0.46)]), _rect(0.0, -0.66, 0.05, 0.34),
-    ])))
-
-    templates.append(ShapeTemplate("Star", _star(0.0, 0.04, 0.92, 0.38)))
-    templates.append(ShapeTemplate("Heart", _heart(0.98, 0.05)))
-
-    robot = _union([
-        _rect(0.0, 0.40, 0.56, 0.34),
-        _rect(0.0, -0.04, 0.92, 0.60),
-        _rect(-0.62, -0.06, 0.22, 0.42), _rect(0.62, -0.06, 0.22, 0.42),
-        _rect(-0.20, -0.70, 0.20, 0.34), _rect(0.20, -0.70, 0.20, 0.34),
-        _rect(0.0, 0.66, 0.06, 0.12), _circle(0.0, 0.75, 0.06),
-    ])
-    templates.append(ShapeTemplate("Robot", robot))
-
-    templates.append(ShapeTemplate("Cloud", _union([
-        _circle(-0.40, 0.04, 0.25), _circle(-0.14, 0.20, 0.30), _circle(0.18, 0.16, 0.28), _circle(0.46, 0.04, 0.22), _rect(0.0, -0.12, 1.10, 0.30),
-    ])))
-
-    templates.append(ShapeTemplate("Planet", _union([_circle(0.0, 0.02, 0.48), _ellipse(0.0, -0.02, 0.88, 0.28, rot=-0.25)])))
-
-    templates.append(ShapeTemplate("Bird", _union([
-        _ellipse(-0.08, 0.00, 0.50, 0.32), _circle(0.38, 0.18, 0.14), _polygon([(0.52, 0.16), (0.84, 0.24), (0.52, 0.02)]),
-        _ellipse(-0.24, 0.10, 0.30, 0.19, rot=-0.45), _rect(0.00, -0.44, 0.06, 0.24),
-    ])))
-
-    teddy = _union([
-        _circle(-0.22, 0.56, 0.13), _circle(0.22, 0.56, 0.13),
-        _circle(0.0, 0.36, 0.28), _ellipse(0.0, -0.08, 0.40, 0.38),
-        _circle(-0.38, -0.06, 0.16), _circle(0.38, -0.06, 0.16),
-        _ellipse(-0.20, -0.56, 0.16, 0.14), _ellipse(0.20, -0.56, 0.16, 0.14),
-    ])
-    templates.append(ShapeTemplate("Teddy Bear", teddy))
-
-    return templates
-
-
-def mask_for_shape(shape_name: str, rng: random.Random | None = None) -> MaskFn:
-    rng = rng or random.Random()
-    for template in _build_templates(rng):
-        if template.name == shape_name:
-            return template.mask
-    raise KeyError(f"Unknown shape: {shape_name}")
-
-
-def all_shape_names() -> List[str]:
-    return [shape.name for shape in _build_templates(random.Random(12345))]
-
-
-def shape_sequence(total_pages: int, rng: random.Random, min_gap: int = 3) -> List[str]:
-    names = all_shape_names()
+def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 3) -> List[str]:
+    names = all_shape_names(shape_dir)
     sequence: List[str] = []
-
     while len(sequence) < total_pages:
         pool = names.copy()
         rng.shuffle(pool)
@@ -219,12 +337,10 @@ def shape_sequence(total_pages: int, rng: random.Random, min_gap: int = 3) -> Li
             if any(name == prev for prev in sequence[-min_gap:]):
                 continue
             sequence.append(name)
-
         if len(sequence) < total_pages and all(any(n == prev for prev in sequence[-min_gap:]) for n in names):
             candidate = rng.choice(names)
-            if not sequence or candidate != sequence[-1]:
+            if not sequence or sequence[-1] != candidate:
                 sequence.append(candidate)
-
     return sequence
 
 
