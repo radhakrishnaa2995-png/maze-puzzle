@@ -1,4 +1,5 @@
 {
   "pages_per_book": 20,
-  "shape_dir": "assets/shapes"
+  "shape_dir": "assets/shapes",
+  "orientation_mode": "original"
 }
