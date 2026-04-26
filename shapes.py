@@ -1,9 +1,10 @@
 # shapes.py
-"""Shape loading utilities using uploaded assets exactly as provided."""
+"""Shape loading utilities for uploaded assets in assets/shapes."""
 
 from __future__ import annotations
 
 import random
+from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -25,33 +26,41 @@ class LoadedShape:
 def _fill_holes(mask: np.ndarray) -> np.ndarray:
     h, w = mask.shape
     visited = np.zeros((h, w), dtype=bool)
-    stack = []
+    q = deque()
 
     for x in range(w):
-        stack.append((0, x))
-        stack.append((h - 1, x))
+        if not mask[0, x]:
+            visited[0, x] = True
+            q.append((0, x))
+        if not mask[h - 1, x]:
+            visited[h - 1, x] = True
+            q.append((h - 1, x))
     for y in range(h):
-        stack.append((y, 0))
-        stack.append((y, w - 1))
+        if not mask[y, 0]:
+            visited[y, 0] = True
+            q.append((y, 0))
+        if not mask[y, w - 1]:
+            visited[y, w - 1] = True
+            q.append((y, w - 1))
 
-    while stack:
-        y, x = stack.pop()
-        if not (0 <= y < h and 0 <= x < w):
-            continue
-        if visited[y, x] or mask[y, x]:
-            continue
-        visited[y, x] = True
-        stack.extend([(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)])
+    while q:
+        y, x = q.popleft()
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w and not mask[ny, nx] and not visited[ny, nx]:
+                visited[ny, nx] = True
+                q.append((ny, nx))
 
-    holes = (~mask) & (~visited)
-    return mask | holes
+    return mask | ((~mask) & (~visited))
 
 
-def _normalize_mask(mask: np.ndarray) -> np.ndarray:
-    # Keep original orientation exactly; only denoise, close tiny gaps, fill holes, and crop.
+def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
+    # Preserve orientation. Only strengthen thin outlines and fill interiors.
     img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
-    img = img.filter(ImageFilter.MaxFilter(size=3))
+    img = img.filter(ImageFilter.MaxFilter(size=5))  # thicken lines
+    img = img.filter(ImageFilter.MaxFilter(size=5))  # close small gaps
     img = img.filter(ImageFilter.MinFilter(size=3))
+
     arr = np.array(img) > 0
     arr = _fill_holes(arr)
 
@@ -62,45 +71,48 @@ def _normalize_mask(mask: np.ndarray) -> np.ndarray:
 
 
 def _raster_mask(path: Path) -> np.ndarray:
-    rgba = np.array(Image.open(path).convert("RGBA"))
+    # 1. open, 2. grayscale, 3-4 detect dark object + remove white bg
+    img = Image.open(path).convert("RGBA")
+    rgba = np.array(img)
     alpha = rgba[:, :, 3]
-    rgb = rgba[:, :, :3]
-    gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
 
-    if np.any(alpha < 250):
-        mask = (alpha > 16) & (gray < 245)
-    else:
-        mask = gray < 235
-    return mask
+    gray = np.array(img.convert("L"), dtype=np.uint8)
+
+    # Dark foreground for line-art; transparent regions excluded.
+    foreground = (gray < 235) & (alpha > 8)
+
+    # If image has no transparency and weak contrast, use adaptive threshold fallback.
+    if foreground.sum() < max(20, gray.size // 500):
+        cutoff = int(np.percentile(gray, 75))
+        foreground = gray < min(245, cutoff)
+
+    return _preprocess_outline(foreground)
 
 
-def _svg_mask(path: Path, size: int = 480) -> np.ndarray:
-    # Try PIL render first (if SVG raster plugin is available).
+def _svg_mask(path: Path, size: int = 512) -> np.ndarray:
+    # Attempt rasterization via Pillow plugin support.
     try:
         img = Image.open(path).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
-        arr = np.array(img)
-        if arr[:, :, 3].max() > 0:
-            return arr[:, :, 3] > 10
+        rgba = np.array(img)
+        gray = np.array(img.convert("L"), dtype=np.uint8)
+        alpha = rgba[:, :, 3]
+        foreground = (gray < 235) & (alpha > 8)
+        if foreground.sum() > max(20, gray.size // 500):
+            return _preprocess_outline(foreground)
     except Exception:
         pass
 
-    # Text fallback: conservative silhouette block when direct rasterization is unavailable.
+    # Lightweight fallback for unsupported SVG decoding.
     text = path.read_text(encoding="utf-8", errors="ignore").lower()
     canvas = Image.new("L", (size, size), 0)
+    from PIL import ImageDraw
+
+    d = ImageDraw.Draw(canvas)
     if "circle" in text:
-        tmp = Image.new("L", (size, size), 0)
-        from PIL import ImageDraw
-
-        d = ImageDraw.Draw(tmp)
         d.ellipse((size * 0.12, size * 0.12, size * 0.88, size * 0.88), fill=255)
-        canvas = tmp
     else:
-        from PIL import ImageDraw
-
-        d = ImageDraw.Draw(canvas)
         d.rounded_rectangle((size * 0.14, size * 0.14, size * 0.86, size * 0.86), radius=size * 0.08, fill=255)
-
-    return np.array(canvas) > 0
+    return _preprocess_outline(np.array(canvas) > 0)
 
 
 def _mask_to_fn(mask: np.ndarray) -> MaskFn:
@@ -112,17 +124,28 @@ def _mask_to_fn(mask: np.ndarray) -> MaskFn:
 
     def fn(x: float, y: float) -> bool:
         px = int(round(((x + 1.0) * 0.5) * (w - 1)))
-        py = int(round(((1.0 - ((y + 1.0) * 0.5)) * (h - 1))))
+        py = int(round((1.0 - ((y + 1.0) * 0.5)) * (h - 1)))
         return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
 
     return fn
+
+
+def _is_hidden(path: Path) -> bool:
+    return any(part.startswith(".") for part in path.parts)
 
 
 def _shape_files(shape_dir: str) -> list[Path]:
     root = Path(shape_dir)
     if not root.exists():
         return []
-    return sorted([p for p in root.iterdir() if p.is_file() and p.suffix.lower() in _ALLOWED_EXT])
+
+    files: list[Path] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or _is_hidden(p):
+            continue
+        if p.suffix.lower() in _ALLOWED_EXT:
+            files.append(p)
+    return files
 
 
 @lru_cache(maxsize=8)
@@ -134,8 +157,8 @@ def load_shapes(shape_dir: str = "assets/shapes") -> tuple[LoadedShape, ...]:
         name = path.stem.replace("_", " ").title()
         try:
             raw = _svg_mask(path) if path.suffix.lower() == ".svg" else _raster_mask(path)
-            mask = _normalize_mask(raw)
-            loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(mask)))
+            loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(raw)))
+            print(f"Loaded {path.name}")
         except Exception:
             continue
 
@@ -161,7 +184,6 @@ def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "asset
     if not names:
         return []
 
-    # Ensure every uploaded shape appears before repeating.
     out: List[str] = []
     while len(out) < total_pages:
         cycle = names.copy()
@@ -174,7 +196,6 @@ def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "asset
             if name in out[-min_gap:] and len(names) > min_gap:
                 continue
             out.append(name)
-
     return out[:total_pages]
 
 
