@@ -1,4 +1,4 @@
-"""Load shape silhouettes from PNG/SVG/JPG and expose mask utilities."""
+"""Load shape silhouettes from PNG/SVG/JPG and expose robust mask utilities."""
 
 from __future__ import annotations
 
@@ -6,13 +6,14 @@ import math
 import random
 import re
 import xml.etree.ElementTree as ET
+from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Iterable, List
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 MaskFn = Callable[[float, float], bool]
 _TOKEN_RE = re.compile(r"[A-Za-z]|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
@@ -25,7 +26,7 @@ class LoadedShape:
     contains_fn: MaskFn
 
 
-def _sample_cubic(p0, p1, p2, p3, n=20):
+def _sample_cubic(p0, p1, p2, p3, n=22):
     pts = []
     for i in range(1, n + 1):
         t = i / n
@@ -36,7 +37,7 @@ def _sample_cubic(p0, p1, p2, p3, n=20):
     return pts
 
 
-def _sample_quadratic(p0, p1, p2, n=16):
+def _sample_quadratic(p0, p1, p2, n=18):
     pts = []
     for i in range(1, n + 1):
         t = i / n
@@ -71,7 +72,6 @@ def _parse_path_to_polylines(path_d: str) -> list[list[tuple[float, float]]]:
         elif cmd is None:
             raise ValueError("Invalid SVG path: missing command")
 
-        assert cmd is not None
         rel = cmd.islower()
         op = cmd.upper()
 
@@ -152,107 +152,148 @@ def _parse_path_to_polylines(path_d: str) -> list[list[tuple[float, float]]]:
     return polylines
 
 
-def _parse_points_attr(raw: str) -> list[tuple[float, float]]:
-    nums = [float(n) for n in re.split(r"[ ,]+", raw.strip()) if n]
-    pts = list(zip(nums[0::2], nums[1::2]))
-    if pts and pts[0] != pts[-1]:
-        pts.append(pts[0])
-    return pts
-
-
-def _point_in_poly(x: float, y: float, poly: tuple[tuple[float, float], ...]) -> bool:
-    inside = False
-    j = len(poly) - 1
-    for i, (xi, yi) in enumerate(poly):
-        xj, yj = poly[j]
-        if (yi > y) != (yj > y):
-            x_inter = (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
-            if x < x_inter:
-                inside = not inside
-        j = i
-    return inside
-
-
-def _build_svg_contains(svg_path: Path) -> MaskFn:
+def _draw_svg_outline_to_mask(svg_path: Path, base_size: int = 400) -> np.ndarray:
     raw = svg_path.read_bytes()
     text = raw.decode("utf-8-sig", errors="ignore")
-    start_idx = text.find("<")
-    if start_idx > 0:
-        text = text[start_idx:]
+    idx = text.find("<")
+    if idx > 0:
+        text = text[idx:]
     root = ET.fromstring(text)
     ns = "{http://www.w3.org/2000/svg}"
 
-    polys: list[list[tuple[float, float]]] = []
+    lines: list[list[tuple[float, float]]] = []
+
     for elem in root.iter():
         tag = elem.tag
         if tag == f"{ns}path" and elem.get("d"):
-            polys.extend(_parse_path_to_polylines(elem.get("d", "")))
+            lines.extend(_parse_path_to_polylines(elem.get("d", "")))
         elif tag == f"{ns}polygon" and elem.get("points"):
-            polys.append(_parse_points_attr(elem.get("points", "")))
+            pts = [float(n) for n in re.split(r"[ ,]+", elem.get("points", "").strip()) if n]
+            poly = list(zip(pts[0::2], pts[1::2]))
+            if poly and poly[0] != poly[-1]:
+                poly.append(poly[0])
+            lines.append(poly)
         elif tag == f"{ns}rect":
             x = float(elem.get("x", "0")); y = float(elem.get("y", "0")); w = float(elem.get("width", "0")); h = float(elem.get("height", "0"))
-            polys.append([(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)])
+            lines.append([(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)])
         elif tag == f"{ns}circle":
             cx = float(elem.get("cx", "0")); cy = float(elem.get("cy", "0")); r = float(elem.get("r", "0"))
-            polys.append([(cx + math.cos(2 * math.pi * t / 72) * r, cy + math.sin(2 * math.pi * t / 72) * r) for t in range(73)])
+            lines.append([(cx + math.cos(2 * math.pi * t / 72) * r, cy + math.sin(2 * math.pi * t / 72) * r) for t in range(73)])
         elif tag == f"{ns}ellipse":
             cx = float(elem.get("cx", "0")); cy = float(elem.get("cy", "0")); rx = float(elem.get("rx", "0")); ry = float(elem.get("ry", "0"))
-            polys.append([(cx + math.cos(2 * math.pi * t / 72) * rx, cy + math.sin(2 * math.pi * t / 72) * ry) for t in range(73)])
+            lines.append([(cx + math.cos(2 * math.pi * t / 72) * rx, cy + math.sin(2 * math.pi * t / 72) * ry) for t in range(73)])
 
-    polys = [tuple(p) for p in polys if len(p) >= 3]
-    if not polys:
-        raise ValueError(f"No valid polygonal content in SVG: {svg_path}")
+    if not lines:
+        raise ValueError(f"No drawable SVG outline in {svg_path}")
 
-    xs = [x for poly in polys for x, _ in poly]
-    ys = [y for poly in polys for _, y in poly]
-    cx = (min(xs) + max(xs)) / 2
-    cy = (min(ys) + max(ys)) / 2
-    scale = max(max(xs) - min(xs), max(ys) - min(ys)) / 2
+    xs = [x for line in lines for x, _ in line]
+    ys = [y for line in lines for _, y in line]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    w = max_x - min_x
+    h = max_y - min_y
+    if w <= 0 or h <= 0:
+        raise ValueError(f"Degenerate SVG bounds in {svg_path}")
 
-    def fn(x: float, y: float) -> bool:
-        px = cx + x * scale
-        py = cy + y * scale
-        toggles = 0
-        for poly in polys:
-            if _point_in_poly(px, py, poly):
-                toggles ^= 1
-        return toggles == 1
+    canvas = Image.new("L", (base_size, base_size), 0)
+    draw = ImageDraw.Draw(canvas)
+    pad = base_size * 0.08
+    scale = min((base_size - 2 * pad) / w, (base_size - 2 * pad) / h)
 
-    return fn
+    stroke = max(2, int(base_size * 0.008))
+    for line in lines:
+        mapped = [((x - min_x) * scale + pad, (y - min_y) * scale + pad) for x, y in line]
+        if len(mapped) >= 2:
+            draw.line(mapped, fill=255, width=stroke)
+
+    return np.array(canvas) > 0
+
+
+def _fill_holes(mask: np.ndarray) -> np.ndarray:
+    h, w = mask.shape
+    visited = np.zeros_like(mask, dtype=bool)
+    q = deque()
+
+    for x in range(w):
+        if not mask[0, x]:
+            q.append((0, x)); visited[0, x] = True
+        if not mask[h - 1, x]:
+            q.append((h - 1, x)); visited[h - 1, x] = True
+    for y in range(h):
+        if not mask[y, 0]:
+            q.append((y, 0)); visited[y, 0] = True
+        if not mask[y, w - 1]:
+            q.append((y, w - 1)); visited[y, w - 1] = True
+
+    while q:
+        y, x = q.popleft()
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w and not mask[ny, nx] and not visited[ny, nx]:
+                visited[ny, nx] = True
+                q.append((ny, nx))
+
+    holes = (~mask) & (~visited)
+    return mask | holes
+
+
+def _preprocess_outline_mask(mask: np.ndarray, scale: int = 4) -> np.ndarray:
+    scale = max(3, min(6, scale))
+    img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
+    img = img.resize((img.width * scale, img.height * scale), Image.Resampling.NEAREST)
+
+    # Thicken lines + close small gaps.
+    img = img.filter(ImageFilter.MaxFilter(size=5))
+    img = img.filter(ImageFilter.MaxFilter(size=5))
+    img = img.filter(ImageFilter.MinFilter(size=3))
+
+    arr = np.array(img) > 0
+    arr = _fill_holes(arr)
+    return arr
 
 
 def _build_raster_contains(image_path: Path) -> MaskFn:
     img = Image.open(image_path).convert("RGBA")
     arr = np.array(img)
-
     alpha = arr[:, :, 3]
     rgb = arr[:, :, :3]
-    gray = (0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2])
+    gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
 
-    # Prefer alpha silhouettes when present, otherwise dark-object-on-light-background.
     if np.any(alpha < 250):
-        mask = alpha > 16
-        mask &= gray < 245
+        base = (alpha > 16) & (gray < 245)
     else:
-        mask = gray < 235
+        base = gray < 235
 
-    ys, xs = np.where(mask)
+    base = _preprocess_outline_mask(base)
+    ys, xs = np.where(base)
     if len(xs) == 0:
-        raise ValueError(f"No black silhouette detected in image: {image_path}")
-
-    min_x, max_x = int(xs.min()), int(xs.max())
-    min_y, max_y = int(ys.min()), int(ys.max())
-    cropped = mask[min_y : max_y + 1, min_x : max_x + 1]
+        raise ValueError(f"No silhouette detected in image: {image_path}")
+    cropped = base[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
     h, w = cropped.shape
 
     def fn(x: float, y: float) -> bool:
-        # x,y are normalized to [-1, 1]
         px = int(round((x + 1) * 0.5 * (w - 1)))
         py = int(round((y + 1) * 0.5 * (h - 1)))
         py = (h - 1) - py
-        if 0 <= px < w and 0 <= py < h:
-            return bool(cropped[py, px])
-        return False
+        return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
+
+    return fn
+
+
+def _build_svg_contains(svg_path: Path) -> MaskFn:
+    base = _draw_svg_outline_to_mask(svg_path)
+    processed = _preprocess_outline_mask(base)
+    ys, xs = np.where(processed)
+    if len(xs) == 0:
+        raise ValueError(f"No silhouette detected in SVG: {svg_path}")
+    cropped = processed[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+    h, w = cropped.shape
+
+    def fn(x: float, y: float) -> bool:
+        px = int(round((x + 1) * 0.5 * (w - 1)))
+        py = int(round((y + 1) * 0.5 * (h - 1)))
+        py = (h - 1) - py
+        return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
 
     return fn
 
@@ -288,7 +329,7 @@ def _choose_best_files(files: list[Path]) -> list[Path]:
     chosen: list[Path] = []
     for _, variants in sorted(grouped.items()):
         variants.sort(key=lambda p: (_EXT_PRIORITY.get(p.suffix.lower(), 99), str(p)))
-        chosen.extend(variants)  # keep fallbacks in order if first fails
+        chosen.extend(variants)
     return chosen
 
 
@@ -307,10 +348,7 @@ def load_shapes(shape_dir: str = "assets/shapes") -> tuple[LoadedShape, ...]:
         if name in used_names:
             continue
         try:
-            if f.suffix.lower() == ".svg":
-                contains = _build_svg_contains(f)
-            else:
-                contains = _build_raster_contains(f)
+            contains = _build_svg_contains(f) if f.suffix.lower() == ".svg" else _build_raster_contains(f)
             loaded.append(LoadedShape(name=name, contains_fn=contains))
             used_names.add(name)
         except Exception:
