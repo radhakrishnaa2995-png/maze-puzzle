@@ -1,5 +1,5 @@
 # main.py
-"""Entrypoint to generate a single maze puzzle book PDF."""
+"""Entrypoint to generate a single premium maze puzzle book PDF."""
 
 from __future__ import annotations
 
