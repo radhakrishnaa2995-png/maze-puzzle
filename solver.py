@@ -1,3 +1,4 @@
+# solver.py
 """Maze solving helpers."""
 
 from __future__ import annotations
