@@ -1,8 +1,8 @@
-# shapes.py
-"""Shape loading utilities for uploaded assets in assets/shapes."""
+"""Shape loading and sequencing utilities for uploaded assets."""
 
 from __future__ import annotations
 
+import io
 import random
 import re
 from collections import deque
@@ -26,7 +26,10 @@ class LoadedShape:
 
 
 def _clean_name(path: Path) -> str:
-    base = path.stem
+    base = path.name
+    # Drop extension and extra pseudo-extensions embedded in filenames (e.g. fish.svg.png)
+    base = re.sub(r"\.[A-Za-z0-9]+$", "", base)
+    base = re.sub(r"\bsvg\b", "", base, flags=re.IGNORECASE)
     base = re.sub(r"[._-]+", " ", base)
     base = re.sub(r"\s+", " ", base).strip()
     return base.title() if base else "Shape"
@@ -64,9 +67,8 @@ def _fill_holes(mask: np.ndarray) -> np.ndarray:
 
 
 def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
-    # Keep original orientation; only strengthen line-art and fill enclosed shape.
+    """Only cleanup and crop; never rotate/mirror/invert the uploaded orientation."""
     img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
-    img = img.filter(ImageFilter.MaxFilter(size=5))
     img = img.filter(ImageFilter.MaxFilter(size=5))
     img = img.filter(ImageFilter.MinFilter(size=3))
 
@@ -79,12 +81,11 @@ def _preprocess_outline(mask: np.ndarray) -> np.ndarray:
     return arr[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
 
 
-def _raster_mask(path: Path) -> np.ndarray:
-    # No auto-rotate/flip: read exactly as uploaded.
-    img = Image.open(path).convert("RGBA")
-    rgba = np.array(img)
+def _raster_mask_from_image(img: Image.Image) -> np.ndarray:
+    rgba_img = img.convert("RGBA")
+    rgba = np.array(rgba_img)
     alpha = rgba[:, :, 3]
-    gray = np.array(img.convert("L"), dtype=np.uint8)
+    gray = np.array(rgba_img.convert("L"), dtype=np.uint8)
 
     foreground = (gray < 235) & (alpha > 8)
     if foreground.sum() < max(20, gray.size // 500):
@@ -94,40 +95,42 @@ def _raster_mask(path: Path) -> np.ndarray:
     return _preprocess_outline(foreground)
 
 
-def _svg_mask(path: Path, size: int = 512) -> np.ndarray:
+def _raster_mask(path: Path) -> np.ndarray:
+    with Image.open(path) as img:
+        return _raster_mask_from_image(img)
+
+
+def _svg_mask(path: Path, size: int = 1024) -> np.ndarray:
+    # Some uploads may have .svg extension but actually contain raster bytes.
     try:
-        img = Image.open(path).convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
-        rgba = np.array(img)
-        gray = np.array(img.convert("L"), dtype=np.uint8)
-        alpha = rgba[:, :, 3]
-        foreground = (gray < 235) & (alpha > 8)
-        if foreground.sum() > max(20, gray.size // 500):
-            return _preprocess_outline(foreground)
+        with Image.open(path) as img:
+            return _raster_mask_from_image(img)
     except Exception:
         pass
 
-    text = path.read_text(encoding="utf-8", errors="ignore").lower()
-    canvas = Image.new("L", (size, size), 0)
-    from PIL import ImageDraw
+    try:
+        import cairosvg  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("SVG support requires cairosvg for vector SVG files") from exc
 
-    d = ImageDraw.Draw(canvas)
-    if "circle" in text:
-        d.ellipse((size * 0.12, size * 0.12, size * 0.88, size * 0.88), fill=255)
-    else:
-        d.rounded_rectangle((size * 0.14, size * 0.14, size * 0.86, size * 0.86), radius=size * 0.08, fill=255)
-    return _preprocess_outline(np.array(canvas) > 0)
+    svg_bytes = path.read_bytes()
+    png_bytes = cairosvg.svg2png(bytestring=svg_bytes, output_width=size, output_height=size)
+    with Image.open(io.BytesIO(png_bytes)) as img:
+        return _raster_mask_from_image(img)
 
 
 def _mask_to_fn(mask: np.ndarray) -> MaskFn:
     ys, xs = np.where(mask)
     if len(xs) == 0:
         raise ValueError("Empty mask")
+
     cropped = mask[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
     h, w = cropped.shape
 
     def fn(x: float, y: float) -> bool:
         px = int(round(((x + 1.0) * 0.5) * (w - 1)))
-        py = int(round((1.0 - ((y + 1.0) * 0.5)) * (h - 1)))
+        # Keep uploaded orientation: no vertical inversion.
+        py = int(round(((y + 1.0) * 0.5) * (h - 1)))
         return 0 <= px < w and 0 <= py < h and bool(cropped[py, px])
 
     return fn
@@ -158,15 +161,19 @@ def load_shapes(shape_dir: str = "assets/shapes", orientation_mode: str = "origi
 
     files = _shape_files(shape_dir)
     loaded: list[LoadedShape] = []
+    failures: list[str] = []
 
     for path in files:
-        name = _clean_name(path)
         try:
             raw = _svg_mask(path) if path.suffix.lower() == ".svg" else _raster_mask(path)
-            loaded.append(LoadedShape(name=name, contains_fn=_mask_to_fn(raw), source_file=path.name))
-            print(f"Loaded {path.name}")
-        except Exception:
-            continue
+            loaded.append(LoadedShape(name=_clean_name(path), contains_fn=_mask_to_fn(raw), source_file=path.name))
+        except Exception as exc:
+            failures.append(f"{path.name} ({exc})")
+
+    if failures:
+        print("Skipped unreadable shapes:")
+        for item in failures:
+            print(f" - {item}")
 
     if not loaded:
         raise ValueError(f"No valid uploaded shapes found in {shape_dir}")
@@ -186,20 +193,16 @@ def mask_for_shape(shape_name: str, shape_dir: str = "assets/shapes", orientatio
     return shape.contains_fn
 
 
-def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", min_gap: int = 5, orientation_mode: str = "original") -> List[str]:
+def shape_sequence(total_pages: int, rng: random.Random, shape_dir: str = "assets/shapes", orientation_mode: str = "original") -> List[str]:
     names = all_shape_names(shape_dir, orientation_mode)
     if not names:
         return []
 
-    first = names.copy()
-    rng.shuffle(first)
-    out: List[str] = first[: min(total_pages, len(first))]
-
+    out: List[str] = []
     while len(out) < total_pages:
         cycle = names.copy()
         rng.shuffle(cycle)
         out.extend(cycle)
-
     return out[:total_pages]
 
 
