@@ -1,5 +1,5 @@
 # pdf_builder.py
-"""Premium scene maze puzzle book PDF builder with fixed worksheet-style zones."""
+"""Publication-ready scene maze puzzle book PDF builder."""
 
 from __future__ import annotations
 
@@ -23,10 +23,11 @@ from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
 
-SAFE_LEFT = 0.45 * inch
-SAFE_RIGHT = 0.45 * inch
-SAFE_TOP = 0.45 * inch
-SAFE_BOTTOM = 0.45 * inch
+# Requested clean margins.
+SAFE_LEFT = 0.40 * inch
+SAFE_RIGHT = 0.40 * inch
+SAFE_TOP = 0.40 * inch
+SAFE_BOTTOM = 0.40 * inch
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -100,33 +101,29 @@ def _zones() -> LayoutZones:
     page_w = PAGE_W - SAFE_LEFT - SAFE_RIGHT
     page_h = PAGE_H - SAFE_TOP - SAFE_BOTTOM
 
-    # Reference-style fixed composition:
-    # start icon upper-left, maze upper-middle/right, finish icon lower-right.
-    maze_x = page_x + (page_w * 0.18)
+    # Exact worksheet-style balance:
+    # large maze center/right, start icon upper-left, finish icon lower-right.
+    maze_x = page_x + (page_w * 0.20)
     maze_y = page_y + (page_h * 0.16)
-    maze_w = page_w * 0.72
-    maze_h = page_h * 0.70
+    maze_w = page_w * 0.76  # 72-80%
+    maze_h = page_h * 0.72  # 68-78%
 
     return LayoutZones(page_x, page_y, page_w, page_h, maze_x, maze_y, maze_w, maze_h)
 
 
-def _draw_background(c: canvas.Canvas, bg: colors.Color, rng: random.Random, zones: LayoutZones) -> None:
+def _draw_background(c: canvas.Canvas, bg: colors.Color, zones: LayoutZones) -> None:
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
     c.setStrokeColor(colors.HexColor("#1E293B"))
     c.setLineWidth(1.4)
-    c.roundRect(zones.page_x - 8, zones.page_y - 8, zones.page_w + 16, zones.page_h + 16, 16, fill=0, stroke=1)
-
-    for _ in range(22):
-        c.setFillColor(colors.Color(1, 1, 1, alpha=0.10))
-        c.circle(rng.uniform(20, PAGE_W - 20), rng.uniform(20, PAGE_H - 20), rng.uniform(5, 12), fill=1, stroke=0)
+    c.roundRect(zones.page_x - 6, zones.page_y - 6, zones.page_w + 12, zones.page_h + 12, 14, fill=0, stroke=1)
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
     c.setFillColor(colors.HexColor("#334155"))
     c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(PAGE_W / 2, SAFE_BOTTOM * 0.35, f"Page {page_no}")
+    c.drawCentredString(PAGE_W / 2, SAFE_BOTTOM * 0.34, f"Page {page_no}")
 
 
 def _title_block(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficulty: str, theme_title: str, zones: LayoutZones) -> None:
@@ -134,7 +131,7 @@ def _title_block(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficu
     title_y = PAGE_H - SAFE_TOP - title_h
 
     c.setFillColor(accent)
-    c.roundRect(zones.page_x, title_y, zones.page_w, title_h, 14, fill=1, stroke=0)
+    c.roundRect(zones.page_x, title_y, zones.page_w, title_h, 12, fill=1, stroke=0)
 
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 17)
@@ -182,38 +179,6 @@ def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, size: float) -
         c.roundRect(cx - (size / 2), cy - (size / 2), size, size, 10, fill=1, stroke=0)
 
 
-def _draw_decor(c: canvas.Canvas, zones: LayoutZones, pair: IconPair) -> None:
-    if pair.decor_pos is None:
-        return
-    cx = zones.page_x + (zones.page_w * pair.decor_pos[0])
-    cy = zones.page_y + (zones.page_h * pair.decor_pos[1])
-    size = PAGE_W * (pair.decor_scale or 0.12)
-
-    c.setLineWidth(2)
-    style = pair.decor_style
-    if style == "stars":
-        c.setStrokeColor(colors.HexColor("#7C3AED"))
-        for dx, dy, r in [(-24, 20, 8), (0, 0, 10), (24, -16, 7)]:
-            c.circle(cx + dx, cy + dy, r, fill=0, stroke=1)
-    elif style == "fish":
-        c.setStrokeColor(colors.HexColor("#0EA5E9"))
-        c.ellipse(cx - size * 0.35, cy - size * 0.18, cx + size * 0.15, cy + size * 0.18, fill=0, stroke=1)
-        c.line(cx + size * 0.15, cy, cx + size * 0.30, cy + size * 0.12)
-        c.line(cx + size * 0.15, cy, cx + size * 0.30, cy - size * 0.12)
-    elif style == "road":
-        c.setStrokeColor(colors.HexColor("#334155"))
-        c.roundRect(cx - size * 0.28, cy - size * 0.18, size * 0.56, size * 0.36, 8, fill=0, stroke=1)
-        c.line(cx, cy - size * 0.15, cx, cy + size * 0.15)
-    elif style == "yarn":
-        c.setStrokeColor(colors.HexColor("#EC4899"))
-        c.circle(cx, cy, size * 0.18, fill=0, stroke=1)
-        c.circle(cx + 18, cy - 10, size * 0.08, fill=0, stroke=1)
-    elif style == "signal":
-        c.setStrokeColor(colors.HexColor("#16A34A"))
-        c.line(cx, cy - size * 0.24, cx, cy + size * 0.24)
-        c.circle(cx, cy + size * 0.14, size * 0.06, fill=0, stroke=1)
-
-
 def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: bool, path: list[tuple[int, int]] | None, pair: IconPair) -> None:
     rows, cols = maze.rows, maze.cols
     cell = min(zones.maze_w / cols, zones.maze_h / rows)
@@ -229,8 +194,9 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
         y0 = maze_y + ((rows - 1 - r) * cell)
         return x0, y0, x0 + cell, y0 + cell
 
+    # Medium internal walls.
     c.setStrokeColor(colors.HexColor("#1F2937"))
-    c.setLineWidth(max(0.85, cell * 0.10))
+    c.setLineWidth(max(0.9, cell * 0.10))
     for r in range(rows):
         for cc in range(cols):
             x0, y0, x1, y1 = box((r, cc))
@@ -244,8 +210,9 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
             if w["E"]:
                 c.line(x1, y0, x1, y1)
 
+    # Thick outer border with actual entrance/exit openings.
     c.setStrokeColor(colors.black)
-    c.setLineWidth(max(2.2, cell * 0.24))
+    c.setLineWidth(max(2.3, cell * 0.24))
     for r in range(rows):
         for cc in range(cols):
             x0, y0, x1, y1 = box((r, cc))
@@ -259,7 +226,7 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
             if cc == cols - 1 and w["E"]:
                 c.line(x1, y0, x1, y1)
 
-    # Fixed worksheet-style icon positions (Zone A and Zone C).
+    # Only two icons: start + finish. No middle decorations.
     start_x = zones.page_x + (zones.page_w * pair.start_pos[0])
     start_y = zones.page_y + (zones.page_h * pair.start_pos[1])
     finish_x = zones.page_x + (zones.page_w * pair.finish_pos[0])
@@ -270,7 +237,6 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
 
     _draw_icon(c, str(pair.start_path), start_x, start_y, start_size)
     _draw_icon(c, str(pair.finish_path), finish_x, finish_y, finish_size)
-    _draw_decor(c, zones, pair)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
@@ -341,13 +307,13 @@ def build_book(output_file: str, pages: int, seed: int, title: str, icon_dir: st
         seen_signatures.add(sig)
         puzzles.append(PuzzlePage(page_no, pair, maze, solution))
 
-        _draw_background(c, bg_order[idx], rng, zones)
+        _draw_background(c, bg_order[idx], zones)
         _title_block(c, ACCENTS[idx % len(ACCENTS)], page_no, diff_name, pair.title, zones)
         _draw_maze(c, maze, zones, show_solution=False, path=None, pair=pair)
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
-    _draw_background(c, bg_order[pages], rng, zones)
+    _draw_background(c, bg_order[pages], zones)
     c.setFillColor(colors.HexColor("#0F172A"))
     c.setFont("Helvetica-Bold", 34)
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.62, "Solutions")
@@ -355,7 +321,7 @@ def build_book(output_file: str, pages: int, seed: int, title: str, icon_dir: st
     c.showPage()
 
     for i, puzzle in enumerate(puzzles, start=1):
-        _draw_background(c, bg_order[pages + i], rng, zones)
+        _draw_background(c, bg_order[pages + i], zones)
         _title_block(c, ACCENTS[(i - 1) % len(ACCENTS)], puzzle.puzzle_number, puzzle.maze.difficulty, puzzle.pair.title, zones)
         _draw_maze(c, puzzle.maze, zones, show_solution=True, path=puzzle.solution, pair=puzzle.pair)
         _draw_bottom_page_no(c, pages + i + 1)
