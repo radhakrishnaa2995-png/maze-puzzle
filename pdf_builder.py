@@ -72,32 +72,18 @@ def _shape_cycles(shape_dir: str, orientation_mode: str, seed: int) -> list[tupl
 
 def _build_shape_plan(pages: int, seed: int, shape_dir: str, orientation_mode: str) -> list[tuple[str, str]]:
     first_cycle = _shape_cycles(shape_dir, orientation_mode, seed)
-    all_names = {name for name, _ in first_cycle}
-    plan: list[tuple[str, str]] = []
+    if pages > len(first_cycle):
+        raise RuntimeError(
+            f"Requested {pages} pages but only {len(first_cycle)} unique shapes are available. "
+            "Reduce page count or add more shapes to avoid repeats."
+        )
 
-    # Rule: use all shapes once before any repeat.
-    plan.extend(first_cycle)
+    # Strict no-repeat policy: one shape per page.
+    plan = first_cycle[:pages]
 
-    rng = random.Random(seed ^ 0x5A5A5A)
-    while len(plan) < pages:
-        cycle = first_cycle.copy()
-        rng.shuffle(cycle)
-        plan.extend(cycle)
-
-    plan = plan[:pages]
-
-    # Output verification and auto-fix before PDF creation.
-    expected = min(len(first_cycle), pages)
-    seen_first = {name for name, _ in plan[:expected]}
-    if seen_first != all_names and pages >= len(first_cycle):
-        fixed = first_cycle.copy()
-        rng.shuffle(fixed)
-        plan[: len(first_cycle)] = fixed
-
-    if pages >= len(first_cycle):
-        check = {name for name, _ in plan[: len(first_cycle)]}
-        if check != all_names:
-            raise RuntimeError("Shape usage verification failed: not all shapes used in first cycle")
+    check = {name for name, _ in plan}
+    if len(check) != len(plan):
+        raise RuntimeError("Shape usage verification failed: repeated shape detected in no-repeat mode")
 
     for i, (_, src) in enumerate(plan, start=1):
         print(f"Using shape {i}: {src}")
@@ -166,8 +152,9 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh
         y0 = oy + (vis_rows - 1 - (r - min_r)) * cell
         return x0, y0, x0 + cell, y0 + cell
 
-    c.setStrokeColor(colors.HexColor("#6B7280"))
-    c.setLineWidth(max(0.35, cell * (0.045 if easy else 0.06)))
+    # Darker, cleaner maze outline for better print visibility.
+    c.setStrokeColor(colors.HexColor("#374151"))
+    c.setLineWidth(max(0.50, cell * (0.055 if easy else 0.07)))
 
     outer = []
     for rc in maze.active_cells:
@@ -197,8 +184,8 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh
                 continue
             outer.append(seg)
 
-    c.setStrokeColor(colors.HexColor("#111827"))
-    c.setLineWidth(max(1.35, cell * 0.14))
+    c.setStrokeColor(colors.HexColor("#0B0F19"))
+    c.setLineWidth(max(1.55, cell * 0.16))
     for seg in outer:
         c.line(*seg)
 
