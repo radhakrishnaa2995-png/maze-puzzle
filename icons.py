@@ -1,4 +1,4 @@
-"""Icon pairing and loading helpers for scene maze books."""
+"""Icon pairing and loading helpers for premium scene maze books."""
 
 from __future__ import annotations
 
@@ -15,15 +15,17 @@ class IconPair:
     finish_label: str
     start_path: Path
     finish_path: Path
+    start_anchor: str
+    end_anchor: str
 
 
-# Required pairings from the request.
+# Exact requested pairings and deliberate visual anchor layouts.
 _ICON_SPECS = [
-    ("car", "Car Maze", "car.png", "car garage.png"),
-    ("cat", "Cat Maze", "cat.png", "milk bowl.png"),
-    ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg"),
-    ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png"),
-    ("train", "Train Maze", "train.png", "train station.png"),
+    ("car", "Car Maze", "car.png", "car garage.png", "left", "right"),
+    ("cat", "Cat Maze", "cat.png", "milk bowl.png", "tl", "br"),
+    ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg", "tl", "br"),
+    ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png", "tr", "bl"),
+    ("train", "Train Maze", "train.png", "train station.png", "bl", "tr"),
 ]
 
 
@@ -32,13 +34,13 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
     if not root.exists():
         raise FileNotFoundError(f"Icon directory not found: {icon_dir}")
 
-    # Case-insensitive index by filename.
     indexed = {p.name.lower(): p for p in root.rglob("*") if p.is_file()}
 
     pairs: List[IconPair] = []
-    for key, title, start_name, finish_name in _ICON_SPECS:
+    for key, title, start_name, finish_name, start_anchor, end_anchor in _ICON_SPECS:
         s = indexed.get(start_name.lower())
         f = indexed.get(finish_name.lower())
+
         if not s or not f:
             print(f"Skipping pair '{title}' (missing: {start_name if not s else ''} {finish_name if not f else ''})")
             continue
@@ -51,6 +53,8 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
                 finish_label=finish_name,
                 start_path=s,
                 finish_path=f,
+                start_anchor=start_anchor,
+                end_anchor=end_anchor,
             )
         )
 
