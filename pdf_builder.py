@@ -81,7 +81,7 @@ def _build_shape_plan(pages: int, seed: int, shape_dir: str, orientation_mode: s
     # Strict no-repeat policy: one shape per page.
     plan = first_cycle[:pages]
 
-    check = {name for name, _ in plan}
+    check = {src for _, src in plan}
     if len(check) != len(plan):
         raise RuntimeError("Shape usage verification failed: repeated shape detected in no-repeat mode")
 
