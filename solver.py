@@ -23,10 +23,12 @@ def solve_maze(maze: Maze) -> List[Cell]:
         for side, (dr, dc) in DIRS.items():
             if maze.walls[cur][side]:
                 continue
+
             nxt = (r + dr, c + dc)
             nr, nc = nxt
             if not (0 <= nr < maze.rows and 0 <= nc < maze.cols):
                 continue
+
             if nxt not in parent:
                 parent[nxt] = cur
                 q.append(nxt)
