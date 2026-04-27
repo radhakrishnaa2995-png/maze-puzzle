@@ -1,4 +1,3 @@
-# solver.py
 """Maze solver utilities (BFS shortest-path for puzzle and solution pages)."""
 
 from __future__ import annotations
@@ -25,7 +24,10 @@ def solve_maze(maze: Maze) -> List[Cell]:
             if maze.walls[cur][side]:
                 continue
             nxt = (r + dr, c + dc)
-            if nxt in maze.active_cells and nxt not in parent:
+            nr, nc = nxt
+            if not (0 <= nr < maze.rows and 0 <= nc < maze.cols):
+                continue
+            if nxt not in parent:
                 parent[nxt] = cur
                 q.append(nxt)
 
