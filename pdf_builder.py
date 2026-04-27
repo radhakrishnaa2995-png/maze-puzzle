@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import random
+from io import BytesIO
 from dataclasses import dataclass
 from hashlib import sha1
 from typing import List
 
+import numpy as np
+from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
@@ -15,7 +18,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from icons import IconPair, load_icon_pairs
-from maze_generator import DIRS, Maze, generate_maze, maze_signature
+from maze_generator import Maze, generate_maze, maze_signature
 from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
@@ -54,11 +57,11 @@ class PuzzlePage:
 
 def _difficulty_for_page(page_idx: int, total_pages: int) -> tuple[str, int, int, float]:
     progress = (page_idx + 1) / max(1, total_pages)
-    if progress <= 0.34:
-        return "Easy", 13, 16, 0.18
-    if progress <= 0.67:
+    if progress <= 0.30:
+        return "Easy", 11, 14, 0.18
+    if progress <= 0.70:
         return "Medium", 17, 22, 0.56
-    return "Hard", 21, 28, 0.92
+    return "Hard", 25, 32, 0.92
 
 
 def _palette_cycle(total: int, rng: random.Random) -> list[colors.Color]:
@@ -136,9 +139,30 @@ def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple
     return iw * scale, ih * scale
 
 
+def _prepare_icon_reader(path: str) -> ImageReader:
+    """Remove near-white backgrounds while preserving colored objects."""
+    img = Image.open(path).convert("RGBA")
+    arr = np.array(img, dtype=np.uint8)
+    rgb = arr[:, :, :3].astype(np.int16)
+    alpha = arr[:, :, 3].astype(np.uint8)
+
+    near_white = (rgb[:, :, 0] >= 242) & (rgb[:, :, 1] >= 242) & (rgb[:, :, 2] >= 242)
+    # Fade white box backgrounds out smoothly.
+    alpha[near_white] = 0
+    edge = (rgb[:, :, 0] >= 230) & (rgb[:, :, 1] >= 230) & (rgb[:, :, 2] >= 230) & (~near_white)
+    alpha[edge] = np.minimum(alpha[edge], 120)
+
+    arr[:, :, 3] = alpha
+    cleaned = Image.fromarray(arr, mode="RGBA")
+    buf = BytesIO()
+    cleaned.save(buf, format="PNG")
+    buf.seek(0)
+    return ImageReader(buf)
+
+
 def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, size: float) -> None:
     try:
-        img = ImageReader(path)
+        img = _prepare_icon_reader(path)
         w, h = _fit_image_box(img, size, size)
         c.drawImage(img, cx - (w / 2), cy - (h / 2), width=w, height=h, preserveAspectRatio=True, mask="auto")
     except Exception:
@@ -165,9 +189,9 @@ def _anchor_icon_point(anchor: str, maze_x: float, maze_y: float, maze_w: float,
 def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh: float, show_solution: bool, path: list[tuple[int, int]] | None, pair: IconPair) -> None:
     rows, cols = maze.rows, maze.cols
 
-    # Use 65-75% area for maze body (target ~70%).
-    max_maze_w = fw * 0.74
-    max_maze_h = fh * 0.72
+    # Use larger central maze footprint (~60-70% page area).
+    max_maze_w = fw * 0.80
+    max_maze_h = fh * 0.80
     cell = min(max_maze_w / cols, max_maze_h / rows)
 
     maze_w = cols * cell
@@ -214,14 +238,16 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh
             if cc == cols - 1 and w["E"]:
                 c.line(x1, y0, x1, y1)
 
-    icon_size = min(90.0, max(56.0, min(fw, fh) * 0.16))
-    icon_gap = (icon_size * 0.55)
+    # Requested professional icon prominence.
+    start_icon_size = PAGE_W * 0.165   # ~16.5% page width
+    finish_icon_size = PAGE_W * 0.14   # ~14% page width
+    icon_gap = (start_icon_size * 0.62)
 
     sx, sy = _anchor_icon_point(pair.start_anchor, maze_x, maze_y, maze_w, maze_h, icon_gap)
     ex, ey = _anchor_icon_point(pair.end_anchor, maze_x, maze_y, maze_w, maze_h, icon_gap)
 
-    _draw_icon(c, str(pair.start_path), sx, sy, icon_size)
-    _draw_icon(c, str(pair.finish_path), ex, ey, icon_size)
+    _draw_icon(c, str(pair.start_path), sx, sy, start_icon_size)
+    _draw_icon(c, str(pair.finish_path), ex, ey, finish_icon_size)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
