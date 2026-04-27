@@ -16,6 +16,24 @@ from PIL import Image, ImageFilter
 
 MaskFn = Callable[[float, float], bool]
 _ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".svg"}
+_PRIORITY_ORDER = [
+    "bird",
+    "butterfly",
+    "car",
+    "cat",
+    "circle",
+    "cloud",
+    "diamond",
+    "dianosaur",
+    "elephant",
+    "fish",
+    "icecream",
+    "star",
+    "teddy",
+    "tree",
+    "triangle",
+    "turtle",
+]
 
 
 @dataclass(frozen=True)
@@ -169,7 +187,13 @@ def _shape_files(shape_dir: str) -> list[Path]:
             continue
         if p.suffix.lower() in _ALLOWED_EXT:
             files.append(p)
-    return files
+    priority = {name: i for i, name in enumerate(_PRIORITY_ORDER)}
+
+    def file_key(path: Path) -> tuple[int, str]:
+        clean = _clean_name(path).lower().replace(" ", "")
+        return (priority.get(clean, 10_000), path.name.lower())
+
+    return sorted(files, key=file_key)
 
 
 @lru_cache(maxsize=16)
@@ -202,6 +226,7 @@ def load_shapes(shape_dir: str = "assets/shapes", orientation_mode: str = "origi
         raise ValueError(f"No valid uploaded shapes found in {shape_dir}")
 
     print(f"Loaded {len(loaded)} shapes")
+    print("Shape order:", ", ".join(s.source_file for s in loaded))
     return tuple(loaded)
 
 
