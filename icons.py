@@ -29,7 +29,7 @@ _ICON_SPECS = [
     ("cat", "Cat Maze", "cat.png", "milk bowl.png"),
     ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg"),
     ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png"),
-    ("train", "Train Maze", "train station.png"),
+    ("train", "Train Maze", "train.png", "train station.png"),
 ]
 
 # Worksheet-style fixed layout defaults.
@@ -48,6 +48,12 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
         raise FileNotFoundError(f"Icon directory not found: {icon_dir}")
 
     indexed = {p.name.lower(): p for p in root.rglob("*") if p.is_file()}
+
+    invalid_specs = [row for row in _ICON_SPECS if len(row) != 4]
+    if invalid_specs:
+        for row in invalid_specs:
+            print(f"Invalid _ICON_SPECS row (expected 4 values): {row}")
+        raise ValueError("Invalid _ICON_SPECS configuration. Each row must contain 4 values.")
 
     pairs: List[IconPair] = []
     for key, title, start_name, finish_name in _ICON_SPECS:
