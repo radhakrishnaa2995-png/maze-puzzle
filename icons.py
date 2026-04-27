@@ -24,7 +24,7 @@ _ICON_SPECS = [
     ("car", "Car Maze", "car.png", "car garage.png", "left", "right"),
     ("cat", "Cat Maze", "cat.png", "milk bowl.png", "tl", "br"),
     ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg", "tl", "br"),
-    ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png", "tr", "bl"),
+    ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png", "tl", "br"),
     ("train", "Train Maze", "train.png", "train station.png", "bl", "tr"),
 ]
 
