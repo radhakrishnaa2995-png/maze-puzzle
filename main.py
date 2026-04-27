@@ -1,5 +1,5 @@
 # main.py
-"""Entrypoint to generate a single premium maze puzzle book PDF."""
+"""Entrypoint for Scene Maze Puzzle Book PDF generation."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ import os
 import secrets
 import time
 
+from icons import load_icon_pairs
 from pdf_builder import build_book
-from shapes import all_shape_names, load_shapes
 
 OUTPUT_DIR = "output"
 CONFIG_FILE = "config.json"
-OUTPUT_FILE = "Maze_Puzzle_Book.pdf"
+OUTPUT_FILE = "Scene_Maze_Puzzle_Book.pdf"
 
 
 def main() -> None:
@@ -22,30 +22,27 @@ def main() -> None:
     with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
         cfg = json.load(fh)
 
-    shape_dir = str(cfg.get("shape_dir", "assets/shapes"))
-    orientation_mode = str(cfg.get("orientation_mode", "original"))
-    if orientation_mode != "original":
-        raise ValueError("orientation_mode must be 'original'")
+    icon_dir = str(cfg.get("icon_dir", "assets/icons"))
+    pages_per_book = int(cfg.get("pages_per_book", 15))
 
-    loaded = load_shapes(shape_dir, orientation_mode)
-    if not loaded:
-        raise RuntimeError(f"No usable shapes loaded from {shape_dir}")
+    available_pairs = load_icon_pairs(icon_dir)
+    pages = max(1, pages_per_book)
 
-    shapes_count = len(all_shape_names(shape_dir, orientation_mode))
-    # One unique shape per page; no repeats.
-    pages = shapes_count
+    if pages < len(available_pairs):
+        # Keep all themes represented at least once.
+        pages = len(available_pairs)
 
     seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
-
     out_path = os.path.join(OUTPUT_DIR, OUTPUT_FILE)
+
     build_book(
         output_file=out_path,
         pages=pages,
         seed=seed,
-        title="Maze Puzzle Book for Kids",
-        shape_dir=shape_dir,
-        orientation_mode=orientation_mode,
+        title="Scene Maze Puzzle Book for Kids",
+        icon_dir=icon_dir,
     )
+
     print(f"Generated {out_path}")
 
 
