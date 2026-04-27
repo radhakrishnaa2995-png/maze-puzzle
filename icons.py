@@ -1,4 +1,4 @@
-"""Icon pairing and loading helpers for premium scene maze books."""
+"""Icon pairing and fixed layout metadata for premium scene maze books."""
 
 from __future__ import annotations
 
@@ -9,24 +9,38 @@ from typing import List
 
 @dataclass(frozen=True)
 class IconPair:
-    key: str
     title: str
-    start_label: str
-    finish_label: str
+    key: str
     start_path: Path
     finish_path: Path
+    difficulty: str
     start_anchor: str
     end_anchor: str
+    start_pos: tuple[float, float]   # normalized page-zone position
+    finish_pos: tuple[float, float]  # normalized page-zone position
+    decor_pos: tuple[float, float] | None
+    start_scale: float
+    finish_scale: float
+    decor_scale: float | None
+    decor_style: str
 
 
-# Exact requested pairings and deliberate visual anchor layouts.
+# Exact requested pairings.
 _ICON_SPECS = [
-    ("car", "Car Maze", "car.png", "car garage.png", "left", "right"),
-    ("cat", "Cat Maze", "cat.png", "milk bowl.png", "tl", "br"),
-    ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg", "tl", "br"),
-    ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png", "tl", "br"),
-    ("train", "Train Maze", "train.png", "train station.png", "bl", "tr"),
+    ("car", "Car Maze", "car.png", "car garage.png"),
+    ("cat", "Cat Maze", "cat.png", "milk bowl.png"),
+    ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg"),
+    ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png"),
+    ("train", "Train Maze", "train.png", "train station.png"),
 ]
+
+_THEME_DEFAULTS = {
+    "car": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.74), "finish_pos": (0.86, 0.18), "decor_pos": (0.54, 0.47), "start_scale": 0.20, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "road"},
+    "cat": {"start_anchor": "left", "end_anchor": "right", "start_pos": (0.12, 0.52), "finish_pos": (0.86, 0.52), "decor_pos": (0.54, 0.44), "start_scale": 0.20, "finish_scale": 0.16, "decor_scale": 0.11, "decor_style": "yarn"},
+    "rocket": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.22), "decor_pos": (0.58, 0.50), "start_scale": 0.21, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "stars"},
+    "pirate": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.74), "finish_pos": (0.86, 0.18), "decor_pos": (0.56, 0.45), "start_scale": 0.22, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "fish"},
+    "train": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.74), "finish_pos": (0.86, 0.18), "decor_pos": (0.56, 0.44), "start_scale": 0.21, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "signal"},
+}
 
 
 def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
@@ -37,7 +51,7 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
     indexed = {p.name.lower(): p for p in root.rglob("*") if p.is_file()}
 
     pairs: List[IconPair] = []
-    for key, title, start_name, finish_name, start_anchor, end_anchor in _ICON_SPECS:
+    for key, title, start_name, finish_name in _ICON_SPECS:
         s = indexed.get(start_name.lower())
         f = indexed.get(finish_name.lower())
 
@@ -45,16 +59,23 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
             print(f"Skipping pair '{title}' (missing: {start_name if not s else ''} {finish_name if not f else ''})")
             continue
 
+        d = _THEME_DEFAULTS.get(key, {})
         pairs.append(
             IconPair(
-                key=key,
                 title=title,
-                start_label=start_name,
-                finish_label=finish_name,
+                key=key,
                 start_path=s,
                 finish_path=f,
-                start_anchor=start_anchor,
-                end_anchor=end_anchor,
+                difficulty="",
+                start_anchor=d.get("start_anchor", "tl"),
+                end_anchor=d.get("end_anchor", "br"),
+                start_pos=d.get("start_pos", (0.12, 0.74)),
+                finish_pos=d.get("finish_pos", (0.86, 0.18)),
+                decor_pos=d.get("decor_pos", (0.56, 0.45)),
+                start_scale=d.get("start_scale", 0.20),
+                finish_scale=d.get("finish_scale", 0.16),
+                decor_scale=d.get("decor_scale", 0.12),
+                decor_style=d.get("decor_style", "road"),
             )
         )
 
