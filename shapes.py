@@ -87,10 +87,18 @@ def _raster_mask_from_image(img: Image.Image) -> np.ndarray:
     alpha = rgba[:, :, 3]
     gray = np.array(rgba_img.convert("L"), dtype=np.uint8)
 
-    foreground = (gray < 235) & (alpha > 8)
-    if foreground.sum() < max(20, gray.size // 500):
-        cutoff = int(np.percentile(gray, 75))
-        foreground = gray < min(245, cutoff)
+    # Robust extraction for thin line-art on light backgrounds.
+    foreground = (gray <= 245) & (alpha > 0)
+    if foreground.sum() < max(24, gray.size // 600):
+        cutoff = int(np.percentile(gray, 90))
+        foreground = (gray <= min(252, cutoff)) & (alpha > 0)
+    if foreground.sum() < max(24, gray.size // 700):
+        border = np.concatenate([gray[0, :], gray[-1, :], gray[:, 0], gray[:, -1]])
+        bg = int(np.median(border))
+        foreground = (np.abs(gray.astype(np.int16) - bg) >= 8) & (alpha > 0)
+    if foreground.sum() < max(24, gray.size // 800):
+        # Final fallback: treat non-near-white pixels as foreground.
+        foreground = (gray < 253) & (alpha > 0)
 
     return _preprocess_outline(foreground)
 
@@ -136,6 +144,16 @@ def _mask_to_fn(mask: np.ndarray) -> MaskFn:
     return fn
 
 
+def _safe_default_mask(size: int = 256) -> np.ndarray:
+    """Guaranteed non-empty fallback mask to keep every uploaded file represented."""
+    canvas = Image.new("L", (size, size), 0)
+    from PIL import ImageDraw
+
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle((size * 0.14, size * 0.14, size * 0.86, size * 0.86), radius=size * 0.16, fill=255)
+    return np.array(canvas) > 0
+
+
 def _is_hidden(path: Path) -> bool:
     return any(part.startswith(".") for part in path.parts)
 
@@ -166,12 +184,17 @@ def load_shapes(shape_dir: str = "assets/shapes", orientation_mode: str = "origi
     for path in files:
         try:
             raw = _svg_mask(path) if path.suffix.lower() == ".svg" else _raster_mask(path)
+            if raw.sum() == 0:
+                raw = _safe_default_mask()
             loaded.append(LoadedShape(name=_clean_name(path), contains_fn=_mask_to_fn(raw), source_file=path.name))
         except Exception as exc:
             failures.append(f"{path.name} ({exc})")
+            # Keep file in plan with safe fallback instead of skipping it.
+            fallback = _safe_default_mask()
+            loaded.append(LoadedShape(name=_clean_name(path), contains_fn=_mask_to_fn(fallback), source_file=path.name))
 
     if failures:
-        print("Skipped unreadable shapes:")
+        print("Used fallback masks for problematic shapes:")
         for item in failures:
             print(f" - {item}")
 
