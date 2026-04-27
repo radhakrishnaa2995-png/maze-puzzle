@@ -1,5 +1,5 @@
 # main.py
-"""Entrypoint for Scene Maze Puzzle Book PDF generation."""
+"""Entrypoint for premium Scene Maze Puzzle Book PDF generation."""
 
 from __future__ import annotations
 
@@ -25,12 +25,8 @@ def main() -> None:
     icon_dir = str(cfg.get("icon_dir", "assets/icons"))
     pages_per_book = int(cfg.get("pages_per_book", 15))
 
-    available_pairs = load_icon_pairs(icon_dir)
-    pages = max(1, pages_per_book)
-
-    if pages < len(available_pairs):
-        # Keep all themes represented at least once.
-        pages = len(available_pairs)
+    pairs = load_icon_pairs(icon_dir)
+    pages = max(len(pairs), max(1, pages_per_book))
 
     seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
     out_path = os.path.join(OUTPUT_DIR, OUTPUT_FILE)
@@ -39,7 +35,7 @@ def main() -> None:
         output_file=out_path,
         pages=pages,
         seed=seed,
-        title="Scene Maze Puzzle Book for Kids",
+        title="Scene Maze Puzzle Book",
         icon_dir=icon_dir,
     )
 
