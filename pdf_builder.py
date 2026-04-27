@@ -15,32 +15,32 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 from icons import IconPair, load_icon_pairs
-from maze_generator import Maze, generate_maze, maze_signature
-from shapes import palette_sequence
+from maze_generator import DIRS, Maze, generate_maze, maze_signature
 from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
 
-SAFE_LEFT = 0.85 * inch
-SAFE_RIGHT = 0.85 * inch
-SAFE_TOP = 0.85 * inch
-SAFE_BOTTOM = 0.85 * inch
+# Requested page margins.
+SAFE_LEFT = 0.45 * inch
+SAFE_RIGHT = 0.45 * inch
+SAFE_TOP = 0.45 * inch
+SAFE_BOTTOM = 0.45 * inch
 
 PASTEL_PALETTE = [
-    colors.HexColor("#DBEAFE"),  # baby blue
-    colors.HexColor("#FED7AA"),  # peach
-    colors.HexColor("#D1FAE5"),  # mint
-    colors.HexColor("#FEF3C7"),  # cream
-    colors.HexColor("#E9D5FF"),  # lavender
-    colors.HexColor("#FBCFE8"),  # pink
+    colors.HexColor("#DBEAFE"),  # pastel blue
+    colors.HexColor("#FBCFE8"),  # pastel pink
+    colors.HexColor("#FED7AA"),  # pastel peach
+    colors.HexColor("#D1FAE5"),  # pastel mint
+    colors.HexColor("#E9D5FF"),  # pastel lavender
+    colors.HexColor("#FEF3C7"),  # pastel cream
 ]
 ACCENTS = [
-    colors.HexColor("#3B82F6"),
-    colors.HexColor("#F97316"),
-    colors.HexColor("#10B981"),
-    colors.HexColor("#F59E0B"),
-    colors.HexColor("#8B5CF6"),
-    colors.HexColor("#EC4899"),
+    colors.HexColor("#2563EB"),
+    colors.HexColor("#DB2777"),
+    colors.HexColor("#EA580C"),
+    colors.HexColor("#059669"),
+    colors.HexColor("#7C3AED"),
+    colors.HexColor("#CA8A04"),
 ]
 
 
@@ -55,10 +55,19 @@ class PuzzlePage:
 def _difficulty_for_page(page_idx: int, total_pages: int) -> tuple[str, int, int, float]:
     progress = (page_idx + 1) / max(1, total_pages)
     if progress <= 0.34:
-        return "Easy", 14, 18, 0.18
+        return "Easy", 13, 16, 0.18
     if progress <= 0.67:
-        return "Medium", 18, 24, 0.55
-    return "Hard", 22, 30, 0.92
+        return "Medium", 17, 22, 0.56
+    return "Hard", 21, 28, 0.92
+
+
+def _palette_cycle(total: int, rng: random.Random) -> list[colors.Color]:
+    base = PASTEL_PALETTE.copy()
+    out: list[colors.Color] = []
+    while len(out) < total:
+        rng.shuffle(base)
+        out.extend(base)
+    return out[:total]
 
 
 def _icon_plan(pages: int, pairs: list[IconPair], seed: int) -> list[IconPair]:
@@ -71,49 +80,52 @@ def _icon_plan(pages: int, pairs: list[IconPair], seed: int) -> list[IconPair]:
     return out[:pages]
 
 
-def _draw_soft_background(c: canvas.Canvas, bg: colors.Color, rng: random.Random) -> None:
+def _draw_background(c: canvas.Canvas, bg: colors.Color, rng: random.Random) -> None:
+    # Full-page background color as requested.
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
-    c.setFillColor(colors.white)
-    c.roundRect(16, 16, PAGE_W - 32, PAGE_H - 32, 22, fill=1, stroke=0)
-    c.setStrokeColor(colors.HexColor("#1F2937"))
-    c.setLineWidth(2)
-    c.roundRect(16, 16, PAGE_W - 32, PAGE_H - 32, 22, fill=0, stroke=1)
-    for _ in range(16):
-        c.setFillColor(colors.Color(1, 1, 1, alpha=0.14))
-        c.circle(rng.uniform(30, PAGE_W - 30), rng.uniform(30, PAGE_H - 30), rng.uniform(7, 14), fill=1, stroke=0)
+
+    # Premium thin rounded border inside margins.
+    inner_x = SAFE_LEFT * 0.55
+    inner_y = SAFE_BOTTOM * 0.55
+    inner_w = PAGE_W - (inner_x * 2)
+    inner_h = PAGE_H - (inner_y * 2)
+    c.setStrokeColor(colors.HexColor("#1E293B"))
+    c.setLineWidth(1.5)
+    c.roundRect(inner_x, inner_y, inner_w, inner_h, 16, fill=0, stroke=1)
+
+    # Soft decorations.
+    for _ in range(20):
+        c.setFillColor(colors.Color(1, 1, 1, alpha=0.10))
+        c.circle(rng.uniform(20, PAGE_W - 20), rng.uniform(20, PAGE_H - 20), rng.uniform(5, 13), fill=1, stroke=0)
 
 
-def _draw_page_header(c: canvas.Canvas, page_no: int, title: str) -> None:
-    c.setFont("Helvetica-Bold", 11)
+def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
     c.setFillColor(colors.HexColor("#334155"))
-    c.drawString(SAFE_LEFT, PAGE_H - SAFE_TOP + 14, title)
     c.setFont("Helvetica-Bold", 10)
-    c.drawRightString(PAGE_W - SAFE_RIGHT, PAGE_H - SAFE_TOP + 14, f"Page {page_no}")
+    c.drawCentredString(PAGE_W / 2, SAFE_BOTTOM * 0.35, f"Page {page_no}")
 
 
 def _title_block(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficulty: str, theme_title: str) -> tuple[float, float, float, float]:
-    bar_x = SAFE_LEFT
-    bar_w = PAGE_W - SAFE_LEFT - SAFE_RIGHT
-    bar_h = 36
-    bar_y = PAGE_H - SAFE_TOP - bar_h - 8
+    title_x = SAFE_LEFT
+    title_w = PAGE_W - SAFE_LEFT - SAFE_RIGHT
+    title_h = 44
+    title_y = PAGE_H - SAFE_TOP - title_h
 
     c.setFillColor(accent)
-    c.roundRect(bar_x, bar_y, bar_w, bar_h, 11, fill=1, stroke=0)
+    c.roundRect(title_x, title_y, title_w, title_h, 14, fill=1, stroke=0)
+
     c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 15)
-    c.drawString(bar_x + 14, bar_y + 22, f"Puzzle {puzzle_no} • {difficulty}")
+    c.setFont("Helvetica-Bold", 17)
+    c.drawString(title_x + 16, title_y + 27, f"Puzzle {puzzle_no} • {difficulty}")
 
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(bar_x, bar_y - 30, theme_title)
+    c.setFont("Helvetica-Bold", 28)
+    c.drawString(title_x, title_y - 34, theme_title)
 
-    c.setFillColor(colors.HexColor("#64748B"))
-    c.setFont("Helvetica", 10)
-    c.drawString(bar_x, bar_y - 44, "Find the path from start icon to finish icon")
-
-    top = bar_y - 58
-    return SAFE_LEFT, SAFE_BOTTOM, PAGE_W - SAFE_LEFT - SAFE_RIGHT, top - SAFE_BOTTOM
+    content_top = title_y - 48
+    content_bottom = SAFE_BOTTOM + 22
+    return SAFE_LEFT, content_bottom, title_w, content_top - content_bottom
 
 
 def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple[float, float]:
@@ -124,40 +136,55 @@ def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple
     return iw * scale, ih * scale
 
 
-def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, max_w: float, max_h: float) -> None:
+def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, size: float) -> None:
     try:
         img = ImageReader(path)
-        w, h = _fit_image_box(img, max_w, max_h)
+        w, h = _fit_image_box(img, size, size)
         c.drawImage(img, cx - (w / 2), cy - (h / 2), width=w, height=h, preserveAspectRatio=True, mask="auto")
     except Exception:
         c.setFillColor(colors.HexColor("#CBD5E1"))
-        c.roundRect(cx - (max_w / 2), cy - (max_h / 2), max_w, max_h, 8, fill=1, stroke=0)
+        c.roundRect(cx - (size / 2), cy - (size / 2), size, size, 10, fill=1, stroke=0)
 
 
-def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh: float, show_solution: bool, path: list[tuple[int, int]] | None, start_icon: str, finish_icon: str) -> None:
+def _anchor_icon_point(anchor: str, maze_x: float, maze_y: float, maze_w: float, maze_h: float, gap: float) -> tuple[float, float]:
+    if anchor == "tl":
+        return maze_x - gap, maze_y + maze_h + gap
+    if anchor == "tr":
+        return maze_x + maze_w + gap, maze_y + maze_h + gap
+    if anchor == "bl":
+        return maze_x - gap, maze_y - gap
+    if anchor == "br":
+        return maze_x + maze_w + gap, maze_y - gap
+    if anchor == "left":
+        return maze_x - gap, maze_y + (maze_h / 2)
+    if anchor == "right":
+        return maze_x + maze_w + gap, maze_y + (maze_h / 2)
+    return maze_x - gap, maze_y + (maze_h / 2)
+
+
+def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh: float, show_solution: bool, path: list[tuple[int, int]] | None, pair: IconPair) -> None:
     rows, cols = maze.rows, maze.cols
-    icon_space = min(84.0, fw * 0.12)
-    pad = 8.0
 
-    grid_x = fx + icon_space + pad
-    grid_w = fw - (2 * (icon_space + pad))
-    grid_h = fh
-    cell = min(grid_w / cols, grid_h / rows)
+    # Use 65-75% area for maze body (target ~70%).
+    max_maze_w = fw * 0.74
+    max_maze_h = fh * 0.72
+    cell = min(max_maze_w / cols, max_maze_h / rows)
+
     maze_w = cols * cell
     maze_h = rows * cell
-    ox = grid_x + (grid_w - maze_w) / 2
-    oy = fy + (fh - maze_h) / 2
+    maze_x = fx + (fw - maze_w) / 2
+    maze_y = fy + (fh - maze_h) / 2
 
     def box(cell_rc: tuple[int, int]) -> tuple[float, float, float, float]:
         r, cc = cell_rc
-        x0 = ox + (cc * cell)
-        y0 = oy + ((rows - 1 - r) * cell)
+        x0 = maze_x + (cc * cell)
+        y0 = maze_y + ((rows - 1 - r) * cell)
         return x0, y0, x0 + cell, y0 + cell
 
-    c.setStrokeColor(colors.HexColor("#334155"))
-    c.setLineWidth(max(0.9, cell * 0.12))
+    # Medium internal walls.
+    c.setStrokeColor(colors.HexColor("#1F2937"))
+    c.setLineWidth(max(0.85, cell * 0.10))
 
-    # Internal walls
     for r in range(rows):
         for cc in range(cols):
             x0, y0, x1, y1 = box((r, cc))
@@ -171,30 +198,34 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, fx: float, fy: float, fw: float, fh
             if w["E"]:
                 c.line(x1, y0, x1, y1)
 
-    # Thick outer border
-    c.setStrokeColor(colors.HexColor("#0F172A"))
-    c.setLineWidth(max(2.4, cell * 0.24))
-    c.rect(ox, oy, maze_w, maze_h, fill=0, stroke=1)
+    # Thick outer walls with real openings preserved.
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(max(2.2, cell * 0.23))
+    for r in range(rows):
+        for cc in range(cols):
+            x0, y0, x1, y1 = box((r, cc))
+            w = maze.walls[(r, cc)]
+            if r == 0 and w["N"]:
+                c.line(x0, y1, x1, y1)
+            if r == rows - 1 and w["S"]:
+                c.line(x0, y0, x1, y0)
+            if cc == 0 and w["W"]:
+                c.line(x0, y0, x0, y1)
+            if cc == cols - 1 and w["E"]:
+                c.line(x1, y0, x1, y1)
 
-    # Start/finish icon placement and labels
-    start_x = fx + (icon_space * 0.55)
-    finish_x = fx + fw - (icon_space * 0.55)
-    icon_y = oy + (maze_h * 0.50)
+    icon_size = min(90.0, max(56.0, min(fw, fh) * 0.16))
+    icon_gap = (icon_size * 0.55)
 
-    _draw_icon(c, start_icon, start_x, icon_y, icon_space, icon_space)
-    _draw_icon(c, finish_icon, finish_x, icon_y, icon_space, icon_space)
+    sx, sy = _anchor_icon_point(pair.start_anchor, maze_x, maze_y, maze_w, maze_h, icon_gap)
+    ex, ey = _anchor_icon_point(pair.end_anchor, maze_x, maze_y, maze_w, maze_h, icon_gap)
 
-    c.setFillColor(colors.HexColor("#16A34A"))
-    c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(start_x, oy - 16, "START")
-
-    c.setFillColor(colors.HexColor("#DC2626"))
-    c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(finish_x, oy - 16, "FINISH")
+    _draw_icon(c, str(pair.start_path), sx, sy, icon_size)
+    _draw_icon(c, str(pair.finish_path), ex, ey, icon_size)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
-        c.setLineWidth(max(2.0, cell * 0.26))
+        c.setLineWidth(max(1.9, cell * 0.24))
         points = []
         for r, cc in path:
             x0, y0, _, _ = box((r, cc))
@@ -214,7 +245,7 @@ def build_book(output_file: str, pages: int, seed: int, title: str, icon_dir: st
 
     pairs = load_icon_pairs(icon_dir)
     plan = _icon_plan(pages, pairs, seed)
-    bg_order = palette_sequence((pages * 2) + 10, PASTEL_PALETTE, rng)
+    bg_order = _palette_cycle((pages * 2) + 12, rng)
 
     puzzles: List[PuzzlePage] = []
     seen_signatures: set[str] = set()
@@ -227,9 +258,18 @@ def build_book(output_file: str, pages: int, seed: int, title: str, icon_dir: st
         maze = None
         solution: list[tuple[int, int]] = []
         sig = ""
-        for attempt in range(30):
+
+        for attempt in range(42):
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
-            candidate = generate_maze(rows, cols, pair.key, diff_factor, prng)
+            candidate = generate_maze(
+                rows,
+                cols,
+                pair.key,
+                diff_factor,
+                prng,
+                start_anchor=pair.start_anchor,
+                end_anchor=pair.end_anchor,
+            )
             candidate.difficulty = diff_name
             candidate_path = solve_maze(candidate)
             if not candidate_path:
@@ -243,7 +283,7 @@ def build_book(output_file: str, pages: int, seed: int, title: str, icon_dir: st
 
         if maze is None:
             prng = _unique_rng(seed, page_no, pair.key, diff_name, 999)
-            maze = generate_maze(rows, cols, pair.key, diff_factor, prng)
+            maze = generate_maze(rows, cols, pair.key, diff_factor, prng, pair.start_anchor, pair.end_anchor)
             maze.difficulty = diff_name
             solution = solve_maze(maze)
             sig = maze_signature(maze)
@@ -251,49 +291,27 @@ def build_book(output_file: str, pages: int, seed: int, title: str, icon_dir: st
         seen_signatures.add(sig)
         puzzles.append(PuzzlePage(page_no, pair, maze, solution))
 
-        _draw_soft_background(c, bg_order[idx], rng)
-        _draw_page_header(c, page_no, title)
+        _draw_background(c, bg_order[idx], rng)
         accent = ACCENTS[idx % len(ACCENTS)]
         fx, fy, fw, fh = _title_block(c, accent, page_no, diff_name, pair.title)
-        _draw_maze(
-            c,
-            maze,
-            fx,
-            fy,
-            fw,
-            fh,
-            show_solution=False,
-            path=None,
-            start_icon=str(pair.start_path),
-            finish_icon=str(pair.finish_path),
-        )
+        _draw_maze(c, maze, fx, fy, fw, fh, show_solution=False, path=None, pair=pair)
+        _draw_bottom_page_no(c, page_no)
         c.showPage()
 
     # Solutions cover
-    _draw_soft_background(c, bg_order[pages], rng)
+    _draw_background(c, bg_order[pages], rng)
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 30)
-    c.drawCentredString(PAGE_W / 2, PAGE_H * 0.63, "Solutions")
+    c.setFont("Helvetica-Bold", 34)
+    c.drawCentredString(PAGE_W / 2, PAGE_H * 0.62, "Solutions")
+    _draw_bottom_page_no(c, pages + 1)
     c.showPage()
 
-    # Solution pages
     for i, puzzle in enumerate(puzzles, start=1):
-        _draw_soft_background(c, bg_order[pages + i], rng)
-        _draw_page_header(c, pages + i + 1, f"{title} • Solutions")
+        _draw_background(c, bg_order[pages + i], rng)
         accent = ACCENTS[(i - 1) % len(ACCENTS)]
         fx, fy, fw, fh = _title_block(c, accent, puzzle.puzzle_number, puzzle.maze.difficulty, puzzle.pair.title)
-        _draw_maze(
-            c,
-            puzzle.maze,
-            fx,
-            fy,
-            fw,
-            fh,
-            show_solution=True,
-            path=puzzle.solution,
-            start_icon=str(puzzle.pair.start_path),
-            finish_icon=str(puzzle.pair.finish_path),
-        )
+        _draw_maze(c, puzzle.maze, fx, fy, fw, fh, show_solution=True, path=puzzle.solution, pair=puzzle.pair)
+        _draw_bottom_page_no(c, pages + i + 1)
         c.showPage()
 
     c.save()
