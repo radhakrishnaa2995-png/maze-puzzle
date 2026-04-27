@@ -1,4 +1,4 @@
-"""Rectangular scene-maze generation utilities."""
+"""Premium rectangular scene-maze generation utilities."""
 
 from __future__ import annotations
 
@@ -35,12 +35,20 @@ def _all_cells(rows: int, cols: int) -> List[Cell]:
     return [(r, c) for r in range(rows) for c in range(cols)]
 
 
-def _pick_entrances(rows: int, cols: int, rng: random.Random) -> tuple[Cell, str, Cell, str]:
-    start_row = rng.randint(0, max(0, rows // 3))
-    end_row = rng.randint(max(0, (rows * 2) // 3), rows - 1)
-    start = (start_row, 0)
-    end = (end_row, cols - 1)
-    return start, "W", end, "E"
+def _opening_from_anchor(rows: int, cols: int, anchor: str, is_start: bool) -> tuple[Cell, str]:
+    if anchor == "tl":
+        return ((0, 0), "W" if is_start else "N")
+    if anchor == "tr":
+        return ((0, cols - 1), "N" if is_start else "E")
+    if anchor == "bl":
+        return ((rows - 1, 0), "W" if is_start else "S")
+    if anchor == "br":
+        return ((rows - 1, cols - 1), "E" if is_start else "S")
+    if anchor == "left":
+        return ((rows // 2, 0), "W")
+    if anchor == "right":
+        return ((rows // 2, cols - 1), "E")
+    return ((0, 0), "W") if is_start else ((rows - 1, cols - 1), "E")
 
 
 def _carve_dfs(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], start: Cell, rng: random.Random) -> None:
@@ -50,6 +58,7 @@ def _carve_dfs(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], start: 
     while stack:
         r, c = stack[-1]
         options: list[tuple[str, Cell]] = []
+
         for side, (dr, dc) in DIRS.items():
             nr, nc = r + dr, c + dc
             nxt = (nr, nc)
@@ -69,6 +78,7 @@ def _carve_dfs(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], start: 
 
 def _add_loops(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], rng: random.Random, loop_factor: float) -> None:
     candidates: list[tuple[Cell, str, Cell]] = []
+
     for r in range(rows):
         for c in range(cols):
             cell = (r, c)
@@ -78,8 +88,8 @@ def _add_loops(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], rng: ra
                 if not (0 <= nr < rows and 0 <= nc < cols):
                     continue
                 if walls[cell][side]:
-                    reverse = (nxt, OPPOSITE[side], cell)
-                    if reverse not in candidates:
+                    rev = (nxt, OPPOSITE[side], cell)
+                    if rev not in candidates:
                         candidates.append((cell, side, nxt))
 
     rng.shuffle(candidates)
@@ -97,19 +107,33 @@ def maze_signature(maze: Maze) -> str:
     return f"{maze.theme}|{maze.start}|{maze.end}|" + "|".join(bits)
 
 
-def generate_maze(rows: int, cols: int, theme: str, difficulty_factor: float, rng: random.Random) -> Maze:
+def generate_maze(
+    rows: int,
+    cols: int,
+    theme: str,
+    difficulty_factor: float,
+    rng: random.Random,
+    start_anchor: str = "left",
+    end_anchor: str = "right",
+) -> Maze:
     rows = max(10, rows)
     cols = max(10, cols)
 
     cells = _all_cells(rows, cols)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in cells}
 
-    start, start_side, end, end_side = _pick_entrances(rows, cols, rng)
+    start, start_side = _opening_from_anchor(rows, cols, start_anchor, is_start=True)
+    end, end_side = _opening_from_anchor(rows, cols, end_anchor, is_start=False)
+
+    if start == end:
+        end = (rows - 1, cols - 1)
+        end_side = "E"
+
     _carve_dfs(rows, cols, walls, start, rng)
 
-    # Easy: fewer loops; Hard: more loops and alternate routes.
-    loop_factor = min(0.35, max(0.02, 0.03 + (difficulty_factor * 0.32)))
-    _add_loops(rows, cols, walls, rng, loop_factor=loop_factor)
+    # Difficulty: Easy fewer dead ends, Hard more branches.
+    loop_factor = min(0.34, max(0.02, 0.03 + (difficulty_factor * 0.28)))
+    _add_loops(rows, cols, walls, rng, loop_factor)
 
     walls[start][start_side] = False
     walls[end][end_side] = False
