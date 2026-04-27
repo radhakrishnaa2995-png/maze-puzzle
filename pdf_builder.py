@@ -182,12 +182,15 @@ def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, size: float) -
         c.roundRect(cx - (size / 2), cy - (size / 2), size, size, 10, fill=1, stroke=0)
 
 
-def _draw_decor(c: canvas.Canvas, zones: LayoutZones, style: str) -> None:
-    cx = zones.maze_x + (zones.maze_w * 0.53)
-    cy = zones.maze_y + (zones.maze_h * 0.44)
-    size = PAGE_W * 0.11
+def _draw_decor(c: canvas.Canvas, zones: LayoutZones, pair: IconPair) -> None:
+    if pair.decor_pos is None:
+        return
+    cx = zones.page_x + (zones.page_w * pair.decor_pos[0])
+    cy = zones.page_y + (zones.page_h * pair.decor_pos[1])
+    size = PAGE_W * (pair.decor_scale or 0.12)
 
     c.setLineWidth(2)
+    style = pair.decor_style
     if style == "stars":
         c.setStrokeColor(colors.HexColor("#7C3AED"))
         for dx, dy, r in [(-24, 20, 8), (0, 0, 10), (24, -16, 7)]:
@@ -262,12 +265,12 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
     finish_x = zones.page_x + (zones.page_w * pair.finish_pos[0])
     finish_y = zones.page_y + (zones.page_h * pair.finish_pos[1])
 
-    start_size = PAGE_W * 0.20   # 18-24%
-    finish_size = PAGE_W * 0.16  # 14-20%
+    start_size = PAGE_W * pair.start_scale
+    finish_size = PAGE_W * pair.finish_scale
 
     _draw_icon(c, str(pair.start_path), start_x, start_y, start_size)
     _draw_icon(c, str(pair.finish_path), finish_x, finish_y, finish_size)
-    _draw_decor(c, zones, pair.decor_style)
+    _draw_decor(c, zones, pair)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
