@@ -51,9 +51,17 @@ def _opening_from_anchor(rows: int, cols: int, anchor: str, is_start: bool) -> t
     return ((0, 0), "W") if is_start else ((rows - 1, cols - 1), "E")
 
 
-def _carve_dfs(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], start: Cell, rng: random.Random) -> None:
+def _carve_dfs(
+    rows: int,
+    cols: int,
+    walls: Dict[Cell, Dict[str, bool]],
+    start: Cell,
+    rng: random.Random,
+    straight_preference: float,
+) -> None:
     visited = {start}
-    stack = [start]
+    stack: list[Cell] = [start]
+    prev_dir: dict[Cell, str] = {}
 
     while stack:
         r, c = stack[-1]
@@ -69,9 +77,15 @@ def _carve_dfs(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], start: 
             stack.pop()
             continue
 
-        side, nxt = rng.choice(options)
+        if stack and rng.random() < straight_preference and stack[-1] in prev_dir:
+            last_side = prev_dir[stack[-1]]
+            straight = [opt for opt in options if opt[0] == last_side]
+            side, nxt = rng.choice(straight or options)
+        else:
+            side, nxt = rng.choice(options)
         walls[(r, c)][side] = False
         walls[nxt][OPPOSITE[side]] = False
+        prev_dir[nxt] = side
         visited.add(nxt)
         stack.append(nxt)
 
@@ -129,10 +143,18 @@ def generate_maze(
         end = (rows - 1, cols - 1)
         end_side = "E"
 
-    _carve_dfs(rows, cols, walls, start, rng)
+    # Difficulty profile (visibly different styles).
+    if difficulty_factor <= 0.30:  # Easy
+        straight_pref = 0.74
+        loop_factor = 0.24
+    elif difficulty_factor <= 0.75:  # Medium
+        straight_pref = 0.48
+        loop_factor = 0.12
+    else:  # Hard
+        straight_pref = 0.18
+        loop_factor = 0.05
 
-    # Difficulty: Easy fewer dead ends, Hard more branches.
-    loop_factor = min(0.34, max(0.02, 0.03 + (difficulty_factor * 0.28)))
+    _carve_dfs(rows, cols, walls, start, rng, straight_preference=straight_pref)
     _add_loops(rows, cols, walls, rng, loop_factor)
 
     walls[start][start_side] = False
