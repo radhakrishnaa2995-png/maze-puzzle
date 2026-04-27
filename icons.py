@@ -1,4 +1,4 @@
-"""Icon pairing and fixed layout metadata for premium scene maze books."""
+"""Icon pairing metadata for scene maze puzzle pages."""
 
 from __future__ import annotations
 
@@ -16,30 +16,29 @@ class IconPair:
     difficulty: str
     start_anchor: str
     end_anchor: str
-    start_pos: tuple[float, float]   # normalized page-zone position
-    finish_pos: tuple[float, float]  # normalized page-zone position
+    start_pos: tuple[float, float]
+    finish_pos: tuple[float, float]
     decor_pos: tuple[float, float] | None
     start_scale: float
     finish_scale: float
     decor_scale: float | None
-    decor_style: str
 
 
-# Exact requested pairings.
 _ICON_SPECS = [
     ("car", "Car Maze", "car.png", "car garage.png"),
     ("cat", "Cat Maze", "cat.png", "milk bowl.png"),
     ("rocket", "Rocket Maze", "rocket.jpg", "planet.jpg"),
     ("pirate", "Pirate Maze", "pirates ship.png", "treasure chest.png"),
-    ("train", "Train Maze", "train.png", "train station.png"),
+    ("train", "Train Maze", "train station.png"),
 ]
 
+# Worksheet-style fixed layout defaults.
 _THEME_DEFAULTS = {
-    "car": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.74), "finish_pos": (0.86, 0.18), "decor_pos": (0.54, 0.47), "start_scale": 0.20, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "road"},
-    "cat": {"start_anchor": "left", "end_anchor": "right", "start_pos": (0.12, 0.52), "finish_pos": (0.86, 0.52), "decor_pos": (0.54, 0.44), "start_scale": 0.20, "finish_scale": 0.16, "decor_scale": 0.11, "decor_style": "yarn"},
-    "rocket": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.22), "decor_pos": (0.58, 0.50), "start_scale": 0.21, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "stars"},
-    "pirate": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.74), "finish_pos": (0.86, 0.18), "decor_pos": (0.56, 0.45), "start_scale": 0.22, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "fish"},
-    "train": {"start_anchor": "tl", "end_anchor": "br", "start_pos": (0.12, 0.74), "finish_pos": (0.86, 0.18), "decor_pos": (0.56, 0.44), "start_scale": 0.21, "finish_scale": 0.16, "decor_scale": 0.12, "decor_style": "signal"},
+    "car": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.16), "start_scale": 0.21, "finish_scale": 0.16},
+    "cat": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.16), "start_scale": 0.21, "finish_scale": 0.16},
+    "rocket": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.17), "start_scale": 0.22, "finish_scale": 0.17},
+    "pirate": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.15), "start_scale": 0.23, "finish_scale": 0.17},
+    "train": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.16), "start_scale": 0.22, "finish_scale": 0.17},
 }
 
 
@@ -67,15 +66,14 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
                 start_path=s,
                 finish_path=f,
                 difficulty="",
-                start_anchor=d.get("start_anchor", "tl"),
-                end_anchor=d.get("end_anchor", "br"),
-                start_pos=d.get("start_pos", (0.12, 0.74)),
-                finish_pos=d.get("finish_pos", (0.86, 0.18)),
-                decor_pos=d.get("decor_pos", (0.56, 0.45)),
-                start_scale=d.get("start_scale", 0.20),
+                start_anchor="tl",
+                end_anchor="br",
+                start_pos=d.get("start_pos", (0.12, 0.76)),
+                finish_pos=d.get("finish_pos", (0.86, 0.16)),
+                decor_pos=None,
+                start_scale=d.get("start_scale", 0.21),
                 finish_scale=d.get("finish_scale", 0.16),
-                decor_scale=d.get("decor_scale", 0.12),
-                decor_style=d.get("decor_style", "road"),
+                decor_scale=None,
             )
         )
 
@@ -83,7 +81,4 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
         raise ValueError(f"No valid icon pairs found in {icon_dir}")
 
     print(f"Loaded {len(pairs)} icon pairs from {icon_dir}")
-    for p in pairs:
-        print(f" - {p.title}: {p.start_path.name} -> {p.finish_path.name}")
-
     return pairs
