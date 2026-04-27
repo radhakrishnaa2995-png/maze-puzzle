@@ -24,6 +24,8 @@ def main() -> None:
 
     shape_dir = str(cfg.get("shape_dir", "assets/shapes"))
     orientation_mode = str(cfg.get("orientation_mode", "original"))
+    if orientation_mode != "original":
+        raise ValueError("orientation_mode must be 'original'")
 
     loaded = load_shapes(shape_dir, orientation_mode)
     if not loaded:
