@@ -32,8 +32,8 @@ def main() -> None:
         raise RuntimeError(f"No usable shapes loaded from {shape_dir}")
 
     shapes_count = len(all_shape_names(shape_dir, orientation_mode))
-    configured_pages = int(cfg.get("pages_per_book", 0))
-    pages = max(configured_pages, shapes_count)
+    # One unique shape per page; no repeats.
+    pages = shapes_count
 
     seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
 
