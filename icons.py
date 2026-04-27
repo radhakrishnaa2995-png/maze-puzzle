@@ -24,6 +24,7 @@ class IconPair:
     decor_scale: float | None
 
 
+# Strict schema: (key, title, start_filename, finish_filename)
 _ICON_SPECS = [
     ("car", "Car Maze", "car.png", "car garage.png"),
     ("cat", "Cat Maze", "cat.png", "milk bowl.png"),
@@ -32,13 +33,13 @@ _ICON_SPECS = [
     ("train", "Train Maze", "train.png", "train station.png"),
 ]
 
-# Worksheet-style fixed layout defaults.
-_THEME_DEFAULTS = {
-    "car": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.16), "start_scale": 0.21, "finish_scale": 0.16},
-    "cat": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.16), "start_scale": 0.21, "finish_scale": 0.16},
-    "rocket": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.17), "start_scale": 0.22, "finish_scale": 0.17},
-    "pirate": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.15), "start_scale": 0.23, "finish_scale": 0.17},
-    "train": {"start_pos": (0.12, 0.76), "finish_pos": (0.86, 0.16), "start_scale": 0.22, "finish_scale": 0.17},
+# Fixed worksheet layout values shared across themes.
+# Coordinates are normalized to full page in reportlab space (origin bottom-left).
+_FIXED_LAYOUT = {
+    "start_pos": (0.16, 0.74),
+    "finish_pos": (0.84, 0.12),
+    "start_scale": 0.20,
+    "finish_scale": 0.16,
 }
 
 
@@ -64,7 +65,6 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
             print(f"Skipping pair '{title}' (missing: {start_name if not s else ''} {finish_name if not f else ''})")
             continue
 
-        d = _THEME_DEFAULTS.get(key, {})
         pairs.append(
             IconPair(
                 title=title,
@@ -74,11 +74,11 @@ def load_icon_pairs(icon_dir: str = "assets/icons") -> List[IconPair]:
                 difficulty="",
                 start_anchor="tl",
                 end_anchor="br",
-                start_pos=d.get("start_pos", (0.12, 0.76)),
-                finish_pos=d.get("finish_pos", (0.86, 0.16)),
+                start_pos=_FIXED_LAYOUT["start_pos"],
+                finish_pos=_FIXED_LAYOUT["finish_pos"],
                 decor_pos=None,
-                start_scale=d.get("start_scale", 0.21),
-                finish_scale=d.get("finish_scale", 0.16),
+                start_scale=_FIXED_LAYOUT["start_scale"],
+                finish_scale=_FIXED_LAYOUT["finish_scale"],
                 decor_scale=None,
             )
         )
