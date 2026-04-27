@@ -1,4 +1,5 @@
 {
   "pages_per_book": 15,
-  "icon_dir": "assets/icons"
+  "icon_dir": "assets/icons",
+  "layout_mode": "fixed_grid_worksheet"
 }
