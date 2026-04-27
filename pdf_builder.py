@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import random
-from io import BytesIO
 from dataclasses import dataclass
 from hashlib import sha1
+from io import BytesIO
 from typing import List
 
 import numpy as np
 from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -23,11 +22,25 @@ from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
 
-# Requested clean margins.
-SAFE_LEFT = 0.40 * inch
-SAFE_RIGHT = 0.40 * inch
-SAFE_TOP = 0.40 * inch
-SAFE_BOTTOM = 0.40 * inch
+# Strict layout percentages on full page.
+MARGIN_PCT = 0.05
+HEADER_PCT = 0.10
+LEFT_ZONE_PCT = 0.25
+MAZE_X_PCT = 0.30
+MAZE_Y_PCT = 0.16
+MAZE_W_PCT = 0.62
+MAZE_H_PCT = 0.72
+
+# Fixed icon targets (deterministic, page-based).
+START_X_PCT = 0.16
+START_Y_PCT = 0.74
+START_W_PCT = 0.20
+START_H_PCT = 0.24
+
+FINISH_X_PCT = 0.84
+FINISH_Y_PCT = 0.12
+FINISH_W_PCT = 0.16
+FINISH_H_PCT = 0.20
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -61,10 +74,22 @@ class LayoutZones:
     page_y: float
     page_w: float
     page_h: float
+    header_x: float
+    header_y: float
+    header_w: float
+    header_h: float
     maze_x: float
     maze_y: float
     maze_w: float
     maze_h: float
+    start_cx: float
+    start_cy: float
+    start_w: float
+    start_h: float
+    finish_cx: float
+    finish_cy: float
+    finish_w: float
+    finish_h: float
 
 
 def _difficulty_for_page(page_idx: int, total_pages: int) -> tuple[str, int, int, float]:
@@ -96,19 +121,53 @@ def _icon_plan(pages: int, pairs: list[IconPair], seed: int) -> list[IconPair]:
 
 
 def _zones() -> LayoutZones:
-    page_x = SAFE_LEFT
-    page_y = SAFE_BOTTOM
-    page_w = PAGE_W - SAFE_LEFT - SAFE_RIGHT
-    page_h = PAGE_H - SAFE_TOP - SAFE_BOTTOM
+    page_x = PAGE_W * MARGIN_PCT
+    page_y = PAGE_H * MARGIN_PCT
+    page_w = PAGE_W * (1.0 - (2 * MARGIN_PCT))
+    page_h = PAGE_H * (1.0 - (2 * MARGIN_PCT))
 
-    # Exact worksheet-style balance:
-    # large maze center/right, start icon upper-left, finish icon lower-right.
-    maze_x = page_x + (page_w * 0.20)
-    maze_y = page_y + (page_h * 0.16)
-    maze_w = page_w * 0.76  # 72-80%
-    maze_h = page_h * 0.72  # 68-78%
+    header_x = page_x
+    header_y = PAGE_H * (1.0 - MARGIN_PCT - HEADER_PCT)
+    header_w = page_w
+    header_h = PAGE_H * HEADER_PCT
 
-    return LayoutZones(page_x, page_y, page_w, page_h, maze_x, maze_y, maze_w, maze_h)
+    maze_x = PAGE_W * MAZE_X_PCT
+    maze_y = PAGE_H * MAZE_Y_PCT
+    maze_w = PAGE_W * MAZE_W_PCT
+    maze_h = PAGE_H * MAZE_H_PCT
+
+    start_cx = PAGE_W * START_X_PCT
+    start_cy = PAGE_H * START_Y_PCT
+    start_w = PAGE_W * START_W_PCT
+    start_h = PAGE_H * START_H_PCT
+
+    finish_cx = PAGE_W * FINISH_X_PCT
+    finish_cy = PAGE_H * FINISH_Y_PCT
+    finish_w = PAGE_W * FINISH_W_PCT
+    finish_h = PAGE_H * FINISH_H_PCT
+
+    return LayoutZones(
+        page_x,
+        page_y,
+        page_w,
+        page_h,
+        header_x,
+        header_y,
+        header_w,
+        header_h,
+        maze_x,
+        maze_y,
+        maze_w,
+        maze_h,
+        start_cx,
+        start_cy,
+        start_w,
+        start_h,
+        finish_cx,
+        finish_cy,
+        finish_w,
+        finish_h,
+    )
 
 
 def _draw_background(c: canvas.Canvas, bg: colors.Color, zones: LayoutZones) -> None:
@@ -117,29 +176,26 @@ def _draw_background(c: canvas.Canvas, bg: colors.Color, zones: LayoutZones) -> 
 
     c.setStrokeColor(colors.HexColor("#1E293B"))
     c.setLineWidth(1.4)
-    c.roundRect(zones.page_x - 6, zones.page_y - 6, zones.page_w + 12, zones.page_h + 12, 14, fill=0, stroke=1)
+    c.roundRect(zones.page_x, zones.page_y, zones.page_w, zones.page_h, 14, fill=0, stroke=1)
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
     c.setFillColor(colors.HexColor("#334155"))
     c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(PAGE_W / 2, SAFE_BOTTOM * 0.34, f"Page {page_no}")
+    c.drawCentredString(PAGE_W / 2, PAGE_H * 0.028, f"Page {page_no}")
 
 
 def _title_block(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficulty: str, theme_title: str, zones: LayoutZones) -> None:
-    title_h = 44
-    title_y = PAGE_H - SAFE_TOP - title_h
-
     c.setFillColor(accent)
-    c.roundRect(zones.page_x, title_y, zones.page_w, title_h, 12, fill=1, stroke=0)
+    c.roundRect(zones.header_x, zones.header_y, zones.header_w, zones.header_h * 0.64, 12, fill=1, stroke=0)
 
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 17)
-    c.drawString(zones.page_x + 16, title_y + 27, f"Puzzle {puzzle_no} • {difficulty}")
+    c.drawString(zones.header_x + 16, zones.header_y + (zones.header_h * 0.40), f"Puzzle {puzzle_no} • {difficulty}")
 
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 28)
-    c.drawString(zones.page_x, title_y - 34, theme_title)
+    c.setFont("Helvetica-Bold", 26)
+    c.drawString(zones.header_x, zones.header_y - 28, theme_title)
 
 
 def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple[float, float]:
@@ -169,22 +225,20 @@ def _prepare_icon_reader(path: str) -> ImageReader:
     return ImageReader(buf)
 
 
-def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, size: float) -> None:
+def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, max_w: float, max_h: float) -> None:
     try:
         img = _prepare_icon_reader(path)
-        w, h = _fit_image_box(img, size, size)
+        w, h = _fit_image_box(img, max_w, max_h)
         c.drawImage(img, cx - (w / 2), cy - (h / 2), width=w, height=h, preserveAspectRatio=True, mask="auto")
     except Exception:
         c.setFillColor(colors.HexColor("#CBD5E1"))
-        c.roundRect(cx - (size / 2), cy - (size / 2), size, size, 10, fill=1, stroke=0)
+        c.roundRect(cx - (max_w / 2), cy - (max_h / 2), max_w, max_h, 10, fill=1, stroke=0)
 
 
 def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: bool, path: list[tuple[int, int]] | None, pair: IconPair) -> None:
     rows, cols = maze.rows, maze.cols
     cell = min(zones.maze_w / cols, zones.maze_h / rows)
 
-    maze_w = cols * cell
-    maze_h = rows * cell
     maze_x = zones.maze_x
     maze_y = zones.maze_y
 
@@ -194,7 +248,6 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
         y0 = maze_y + ((rows - 1 - r) * cell)
         return x0, y0, x0 + cell, y0 + cell
 
-    # Medium internal walls.
     c.setStrokeColor(colors.HexColor("#1F2937"))
     c.setLineWidth(max(0.9, cell * 0.10))
     for r in range(rows):
@@ -210,7 +263,6 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
             if w["E"]:
                 c.line(x1, y0, x1, y1)
 
-    # Thick outer border with actual entrance/exit openings.
     c.setStrokeColor(colors.black)
     c.setLineWidth(max(2.3, cell * 0.24))
     for r in range(rows):
@@ -226,17 +278,9 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
             if cc == cols - 1 and w["E"]:
                 c.line(x1, y0, x1, y1)
 
-    # Only two icons: start + finish. No middle decorations.
-    start_x = zones.page_x + (zones.page_w * pair.start_pos[0])
-    start_y = zones.page_y + (zones.page_h * pair.start_pos[1])
-    finish_x = zones.page_x + (zones.page_w * pair.finish_pos[0])
-    finish_y = zones.page_y + (zones.page_h * pair.finish_pos[1])
-
-    start_size = PAGE_W * pair.start_scale
-    finish_size = PAGE_W * pair.finish_scale
-
-    _draw_icon(c, str(pair.start_path), start_x, start_y, start_size)
-    _draw_icon(c, str(pair.finish_path), finish_x, finish_y, finish_size)
+    # Deterministic worksheet template icon placement.
+    _draw_icon(c, str(pair.start_path), zones.start_cx, zones.start_cy, zones.start_w, zones.start_h)
+    _draw_icon(c, str(pair.finish_path), zones.finish_cx, zones.finish_cy, zones.finish_w, zones.finish_h)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
