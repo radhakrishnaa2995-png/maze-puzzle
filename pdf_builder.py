@@ -7,69 +7,75 @@ class MazePDFBuilder(FPDF):
         self.set_auto_page_break(False)
         self.page_w = 595.28
         self.page_h = 841.89
-        
-        # LAYOUT CONSTANTS (FIX 1 & 8)
-        self.TOP_RESERVED = 120
-        self.BOTTOM_MARGIN = 60
-        self.SIDE_MARGIN = 50
 
-    def add_maze_page(self, grid, title_text, entry_coord, exit_coord, start_img, end_img):
+    def add_maze_page(self, grid, theme_data, page_num, entry, exit, start_img, end_img):
         self.add_page()
         
-        rows = len(grid)
-        cols = len(grid[0])
+        # 1. DRAW PASTEL BACKGROUND
+        bg = theme_data['bg_color']
+        self.set_fill_color(bg[0], bg[1], bg[2])
+        self.rect(0, 0, self.page_w, self.page_h, 'F')
 
-        # CALCULATE CELL SIZE (FIX 2)
-        max_maze_w = self.page_w - (self.SIDE_MARGIN * 2)
-        max_maze_h = self.page_h - self.TOP_RESERVED - self.BOTTOM_MARGIN
+        # 2. HEADER PILL
+        head = theme_data['head_color']
+        self.set_fill_color(head[0], head[1], head[2])
+        # Rounded rectangle for the "Puzzle X - Easy" bar
+        self.rect(40, 40, 515, 30, 'F') 
         
-        cell_size = min(max_maze_w / cols, max_maze_h / rows)
-        
+        self.set_text_color(255, 255, 255)
+        self.set_font("Arial", 'B', 12)
+        self.text(60, 60, f"Puzzle {page_num} - Easy")
+
+        # 3. TITLES
+        self.set_text_color(40, 40, 40)
+        self.set_font("Arial", 'B', 18)
+        self.text(40, 95, theme_data['main_title'])
+        self.set_font("Arial", '', 9)
+        self.text(40, 110, theme_data['sub_title'])
+
+        # 4. MAZE SPECS
+        rows, cols = len(grid), len(grid[0])
+        cell_size = 20
         maze_w = cell_size * cols
         maze_h = cell_size * rows
+        offset_x = (self.page_w - maze_w) / 2
+        offset_y = 150 # Starting below titles
+
+        # 5. DRAW LINE-BASED MAZE (Matching Reference Image 3)
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(1.5)
         
-        # CENTER POSITIONS (FIX 2)
-        start_x = (self.page_w - maze_w) / 2
-        start_y = self.TOP_RESERVED + (max_maze_h - maze_h) / 2
-
-        # DRAW TITLE (FIX 10)
-        self.set_font("Arial", 'B', 20)
-        self.set_y(50)
-        self.cell(0, 40, title_text, 0, 1, 'C')
-
-        # DRAW MAZE
-        self.set_fill_color(0, 0, 0)
         for y in range(rows):
             for x in range(cols):
-                if grid[y][x] == 1:
-                    self.rect(start_x + (x * cell_size), start_y + (y * cell_size), 
-                              cell_size + 0.5, cell_size + 0.5, 'F')
-
-        # IMAGE SYSTEM (FIX 5 & 6)
-        img_display_size = cell_size * 3.5  # Large, visible icons
+                if grid[y][x] == 1: # Wall logic for lines
+                    # Draw horizontal walls
+                    if y == 0 or (y > 0 and grid[y-1][x] == 0):
+                         self.line(offset_x + x*cell_size, offset_y + y*cell_size, 
+                                   offset_x + (x+1)*cell_size, offset_y + y*cell_size)
+                    # Draw vertical walls
+                    if x == 0 or (x > 0 and grid[y][x-1] == 0):
+                        self.line(offset_x + x*cell_size, offset_y + y*cell_size, 
+                                  offset_x + x*cell_size, offset_y + (y+1)*cell_size)
         
-        # Position Start Image (Centered on entry opening)
-        s_idx_x, s_idx_y = entry_coord
-        s_img_x = start_x + (s_idx_x * cell_size) - (img_display_size / 2)
-        s_img_y = start_y + (s_idx_y * cell_size) - (img_display_size / 2)
-        
-        # Position End Image (Centered on exit opening)
-        e_idx_x, e_idx_y = exit_coord
-        e_img_x = start_x + (e_idx_x * cell_size) - (img_display_size / 2)
-        e_img_y = start_y + (e_idx_y * cell_size) - (img_display_size / 2)
+        # External Border
+        self.rect(offset_x, offset_y, maze_w, maze_h)
 
-        # CLAMP IMAGES TO PREVENT OUT-OF-BOUNDS (FIX 7)
-        def clamp(val, min_v, max_v):
-            return max(min_v, min(val, max_v))
-
-        s_img_x = clamp(s_img_x, 20, self.page_w - img_display_size - 20)
-        s_img_y = clamp(s_img_y, self.TOP_RESERVED - 40, self.page_h - 40)
-        
-        e_img_x = clamp(e_img_x, 20, self.page_w - img_display_size - 20)
-        e_img_y = clamp(e_img_y, self.TOP_RESERVED - 40, self.page_h - 40)
-
-        # Place Images
+        # 6. ICON PLACEMENT
+        icon_size = 40
+        # Entry Icon
+        ex, ey = entry
+        ix = offset_x + (ex * cell_size) - (icon_size if ex == 0 else 0)
+        iy = offset_y + (ey * cell_size) - (icon_size/2)
         if os.path.exists(start_img):
-            self.image(start_img, s_img_x, s_img_y, img_display_size)
+            self.image(start_img, ix - 10, iy, icon_size)
+
+        # Exit Icon
+        ox, oy = exit
+        ox_pos = offset_x + (ox * cell_size)
+        oy_pos = offset_y + (oy * cell_size) - (icon_size/2)
         if os.path.exists(end_img):
-            self.image(end_img, e_img_x, e_img_y, img_display_size)
+            self.image(end_img, ox_pos + 5, oy_pos, icon_size)
+
+        # 7. PAGE NUMBER
+        self.set_font("Arial", '', 10)
+        self.text(self.page_w/2 - 10, self.page_h - 40, f"Page {page_num}")
