@@ -2,5 +2,10 @@
   "pages_per_book": 15,
   "icon_dir": "assets/icons",
   "layout_mode": "publication_centered",
-  "output_file": "Maze_Puzzle_Book.pdf"
+  "output_file": "Maze_Puzzle_Book.pdf",
+  "difficulty_profiles": {
+    "easy": {"target": "readable-wide"},
+    "medium": {"target": "balanced"},
+    "hard": {"target": "dense-readable"}
+  }
 }
