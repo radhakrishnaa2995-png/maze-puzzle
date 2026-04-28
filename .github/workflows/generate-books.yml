@@ -3,17 +3,33 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * 1'
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - run: python main.py
-      - uses: actions/upload-artifact@v4
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fpdf2
+          # If you have other dependencies, keep the line below:
+          # pip install -r requirements.txt
+
+      - name: Generate Mazes
+        run: python main.py
+
+      - name: Upload Maze PDF
+        uses: actions/upload-artifact@v4
         with:
           name: maze-books
-          path: output/*.pdf
+          # Based on your script, the file is saved in the root directory.
+          # If you want it in an 'output' folder, create that folder in Python first.
+          path: "*.pdf"
