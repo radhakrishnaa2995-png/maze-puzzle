@@ -360,6 +360,7 @@ def _draw_maze(
     path: list[tuple[int, int]] | None,
     pair: IconPair,
     icon_scale: float,
+    bg_color: colors.Color,
 ) -> None:
     geom = compute_maze_geometry(
         maze,
@@ -426,6 +427,12 @@ def _draw_maze(
 
     _draw_icon(c, str(pair.start_path), start_left + (shared_size / 2), start_bottom + (shared_size / 2), shared_size, shared_size)
     _draw_icon(c, str(pair.finish_path), end_left + (shared_size / 2), end_bottom + (shared_size / 2), shared_size, shared_size)
+
+    # Cover pass: hide icon edge under frame so icon looks tucked into maze side.
+    c.setStrokeColor(bg_color)
+    c.setLineWidth(max(outer_line_width * 6.0, shared_size * 0.20))
+    for seg in outer_segments:
+        c.line(*seg)
 
     # Draw maze outline after icons so icon sides appear tucked under the border.
     c.setStrokeColor(colors.black)
@@ -592,7 +599,7 @@ def build_book(
 
         _draw_page_frame(c, bg_order[page_no - 1], layout)
         _title_and_story(c, ACCENTS[idx % len(ACCENTS)], idx + 1, diff_name, pair, layout)
-        _draw_maze(c, maze, layout, show_solution=False, path=None, pair=pair, icon_scale=icon_scale)
+        _draw_maze(c, maze, layout, show_solution=False, path=None, pair=pair, icon_scale=icon_scale, bg_color=bg_order[page_no - 1])
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
@@ -608,7 +615,16 @@ def build_book(
         page_no = solution_title_page + i
         _draw_page_frame(c, bg_order[(solution_title_page + i - 1) % len(bg_order)], layout)
         _title_and_story(c, ACCENTS[(i - 1) % len(ACCENTS)], puzzle.puzzle_number, puzzle.difficulty, puzzle.pair, layout)
-        _draw_maze(c, puzzle.maze, layout, show_solution=True, path=puzzle.solution, pair=puzzle.pair, icon_scale=icon_scale)
+        _draw_maze(
+            c,
+            puzzle.maze,
+            layout,
+            show_solution=True,
+            path=puzzle.solution,
+            pair=puzzle.pair,
+            icon_scale=icon_scale,
+            bg_color=bg_order[(solution_title_page + i - 1) % len(bg_order)],
+        )
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
