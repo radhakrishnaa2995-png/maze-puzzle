@@ -195,6 +195,50 @@ def _add_loops(active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int,
         walls[nxt][OPPOSITE[side]] = False
 
 
+def _carve_kruskal(
+    rows: int,
+    cols: int,
+    active: Set[Cell],
+    walls: Dict[Cell, Dict[str, bool]],
+    rng: random.Random,
+) -> None:
+    parent: Dict[Cell, Cell] = {cell: cell for cell in active}
+    rank: Dict[Cell, int] = {cell: 0 for cell in active}
+
+    def find(x: Cell) -> Cell:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: Cell, b: Cell) -> bool:
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return False
+        if rank[ra] < rank[rb]:
+            parent[ra] = rb
+        elif rank[ra] > rank[rb]:
+            parent[rb] = ra
+        else:
+            parent[rb] = ra
+            rank[ra] += 1
+        return True
+
+    edges: list[tuple[Cell, str, Cell]] = []
+    for cell in active:
+        for side, nxt in _neighbors(cell, rows, cols):
+            if nxt not in active:
+                continue
+            if cell < nxt:
+                edges.append((cell, side, nxt))
+
+    rng.shuffle(edges)
+    for cell, side, nxt in edges:
+        if union(cell, nxt):
+            walls[cell][side] = False
+            walls[nxt][OPPOSITE[side]] = False
+
+
 def maze_signature(maze: Maze) -> str:
     bits = []
     for cell in sorted(maze.active_cells):
@@ -215,24 +259,24 @@ def generate_maze(
     # Difficulty tuning focused on visual differentiation.
     if difficulty_factor <= 0.30:
         profile = "easy"
-        rows = max(14, min(rows + rng.randint(-2, 2), 20))
-        cols = max(18, min(cols + rng.randint(-2, 2), 28))
+        rows = max(9, min(rows + rng.randint(-1, 2), 12))
+        cols = max(13, min(cols + rng.randint(-2, 2), 18))
         straight_pref = 0.88
-        loop_factor = 0.22
+        loop_factor = 0.16
         branch_bias = 0.68
     elif difficulty_factor <= 0.75:
         profile = "medium"
-        rows = max(20, min(rows + rng.randint(-2, 3), 30))
-        cols = max(24, min(cols + rng.randint(-3, 3), 36))
-        straight_pref = 0.54
-        loop_factor = 0.14
+        rows = max(13, min(rows + rng.randint(-2, 2), 18))
+        cols = max(22, min(cols + rng.randint(-3, 3), 28))
+        straight_pref = 0.58
+        loop_factor = 0.11
         branch_bias = 0.50
     else:
         profile = "hard"
-        rows = max(26, min(rows + rng.randint(-3, 4), 36))
-        cols = max(32, min(cols + rng.randint(-3, 4), 44))
-        straight_pref = 0.24
-        loop_factor = 0.07
+        rows = max(18, min(rows + rng.randint(-2, 2), 24))
+        cols = max(30, min(cols + rng.randint(-3, 3), 40))
+        straight_pref = 0.28
+        loop_factor = 0.06
         branch_bias = 0.35
 
     active = _allowed_mask(rows, cols, rng, profile)
@@ -267,9 +311,11 @@ def generate_maze(
         (end_side_pref, "E", "S", "W", "N"),
     )
 
-    algorithm = rng.choice(["dfs", "prim", "biased"])
+    algorithm = rng.choice(["dfs", "prim", "kruskal", "biased"])
     if algorithm == "prim":
         _carve_prim(rows, cols, active, walls, start, rng, branch_bias=branch_bias)
+    elif algorithm == "kruskal":
+        _carve_kruskal(rows, cols, active, walls, rng)
     elif algorithm == "biased":
         _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=max(0.10, straight_pref * 0.72))
     else:
