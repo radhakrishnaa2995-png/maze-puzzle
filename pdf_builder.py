@@ -28,8 +28,8 @@ PAD_X = 0.06
 PAD_Y = 0.08
 HEADER_H_PX = 110.0
 BOTTOM_MARGIN_PX = 50.0
-MAZE_TARGET_W_RATIO = 0.78
-MAZE_TARGET_H_RATIO = 0.70
+MAZE_TARGET_W_RATIO = 0.75
+MAZE_TARGET_H_RATIO = 0.68
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -307,8 +307,8 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     min_x = margin
     max_x = PAGE_W - margin
 
-    # Large fixed target so all pages feel like the big first-page icon.
-    base_icon_size = max(geom.cell_size * 3.2, PAGE_W * 0.09, geom.maze_height * icon_scale)
+    # Slightly larger fixed target while staying page-safe.
+    base_icon_size = max(geom.cell_size * 3.45, PAGE_W * 0.105, geom.maze_height * icon_scale)
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
         factor = 0.5 + (gap / size)
