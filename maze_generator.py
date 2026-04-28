@@ -259,22 +259,22 @@ def generate_maze(
     # Difficulty tuning focused on visual differentiation.
     if difficulty_factor <= 0.30:
         profile = "easy"
-        rows = max(9, min(rows + rng.randint(-1, 2), 12))
-        cols = max(13, min(cols + rng.randint(-2, 2), 18))
+        rows = max(14, min(rows + rng.randint(-1, 2), 18))
+        cols = max(14, min(cols + rng.randint(-2, 2), 20))
         straight_pref = 0.88
         loop_factor = 0.16
         branch_bias = 0.68
     elif difficulty_factor <= 0.75:
         profile = "medium"
-        rows = max(13, min(rows + rng.randint(-2, 2), 18))
-        cols = max(22, min(cols + rng.randint(-3, 3), 28))
+        rows = max(18, min(rows + rng.randint(-2, 2), 24))
+        cols = max(20, min(cols + rng.randint(-3, 3), 30))
         straight_pref = 0.58
         loop_factor = 0.11
         branch_bias = 0.50
     else:
         profile = "hard"
-        rows = max(18, min(rows + rng.randint(-2, 2), 24))
-        cols = max(30, min(cols + rng.randint(-3, 3), 40))
+        rows = max(24, min(rows + rng.randint(-2, 2), 32))
+        cols = max(28, min(cols + rng.randint(-3, 3), 40))
         straight_pref = 0.28
         loop_factor = 0.06
         branch_bias = 0.35
