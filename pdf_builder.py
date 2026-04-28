@@ -353,45 +353,64 @@ def _draw_maze(
 
     base_icon_size = max(geom.cell_size * 3.2, geom.maze_height * icon_scale)
 
-    def aligned_icon_box(open_x: float, open_y: float, side: str, initial_size: float) -> tuple[float, float, float]:
-        """Place icon on opening normal and shrink if needed so alignment stays exact."""
-        size = initial_size
-        margin = 10.0
-        gap = 5.0
-        max_icon_top = min(layout.maze_top - 8.0, PAGE_H - margin)
-        min_icon_bottom = margin
-        min_x = margin
-        max_x = PAGE_W - margin
+    margin = 10.0
+    gap = 5.0
+    max_icon_top = min(layout.maze_top - 8.0, PAGE_H - margin)
+    min_icon_bottom = margin
+    min_x = margin
+    max_x = PAGE_W - margin
 
-        for _ in range(20):
-            factor = 0.5 + (gap / size)
-            cx, cy = icon_center_from_opening(open_x, open_y, side, size, factor=factor)
-            left = cx - (size / 2)
-            bottom = cy - (size / 2)
-            right = left + size
-            top = bottom + size
-            if left >= min_x and right <= max_x and bottom >= min_icon_bottom and top <= max_icon_top:
-                return left, bottom, size
-            size *= 0.92
-            if size <= geom.cell_size * 2.0:
-                break
-
-        # Last-resort clamp; keep centerline anchored to opening axis.
+    def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
+        """Return aligned box at fixed size and whether it fits without clamping."""
         factor = 0.5 + (gap / size)
         cx, cy = icon_center_from_opening(open_x, open_y, side, size, factor=factor)
-        left = max(min_x, min(max_x - size, cx - (size / 2)))
-        bottom = max(min_icon_bottom, min(max_icon_top - size, cy - (size / 2)))
-        return left, bottom, size
+        left = cx - (size / 2)
+        bottom = cy - (size / 2)
+        right = left + size
+        top = bottom + size
+        fits = left >= min_x and right <= max_x and bottom >= min_icon_bottom and top <= max_icon_top
+        return left, bottom, fits
 
-    start_left, start_bottom, start_size = aligned_icon_box(start_open_x, start_open_y, entry_side, base_icon_size)
-    end_left, end_bottom, end_size = aligned_icon_box(end_open_x, end_open_y, exit_side, base_icon_size)
+    # Choose ONE shared icon size that works for both entry and exit on this page.
+    shared_size = base_icon_size
+    for _ in range(24):
+        _, _, start_fits = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
+        _, _, end_fits = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
+        if start_fits and end_fits:
+            break
+        shared_size *= 0.92
+        if shared_size <= geom.cell_size * 2.0:
+            break
+
+    start_left, start_bottom, _ = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
+    end_left, end_bottom, _ = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
+
+    # Last-resort clamp with same size for both icons.
+    start_left = max(min_x, min(max_x - shared_size, start_left))
+    end_left = max(min_x, min(max_x - shared_size, end_left))
+    start_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, start_bottom))
+    end_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, end_bottom))
 
     # Final validation guards.
     if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
         raise ValueError("Maze geometry escaped reserved vertical zone.")
 
-    _draw_icon(c, str(pair.start_path), start_left + (start_size / 2), start_bottom + (start_size / 2), start_size, start_size)
-    _draw_icon(c, str(pair.finish_path), end_left + (end_size / 2), end_bottom + (end_size / 2), end_size, end_size)
+    _draw_icon(
+        c,
+        str(pair.start_path),
+        start_left + (shared_size / 2),
+        start_bottom + (shared_size / 2),
+        shared_size,
+        shared_size,
+    )
+    _draw_icon(
+        c,
+        str(pair.finish_path),
+        end_left + (shared_size / 2),
+        end_bottom + (shared_size / 2),
+        shared_size,
+        shared_size,
+    )
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
