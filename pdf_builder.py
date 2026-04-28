@@ -88,6 +88,16 @@ class Layout:
     maze_region_h: float
 
 
+@dataclass(frozen=True)
+class IconPlacement:
+    start_left: float
+    start_bottom: float
+    end_left: float
+    end_bottom: float
+    size: float
+    valid: bool
+
+
 def _difficulty_for_page(page_idx: int, total_pages: int, profiles: dict[str, Any] | None = None) -> tuple[str, int, int, float]:
     profiles = profiles or {}
     progress = (page_idx + 1) / max(1, total_pages)
@@ -283,6 +293,61 @@ def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, max_w: float, 
         c.roundRect(cx - (max_w / 2), cy - (max_h / 2), max_w, max_h, 10, fill=1, stroke=0)
 
 
+def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float) -> IconPlacement:
+    entry_row, entry_col, entry_side = maze.entry_opening
+    exit_row, exit_col, exit_side = maze.exit_opening
+    start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
+    end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
+
+    margin = 10.0
+    gap = 5.0
+    # Keep all icons strictly below story text to avoid overlap.
+    max_icon_top = min(layout.story_y - 6.0, PAGE_H - margin)
+    min_icon_bottom = margin
+    min_x = margin
+    max_x = PAGE_W - margin
+
+    # Large fixed target so all pages feel like the big first-page icon.
+    base_icon_size = max(geom.cell_size * 3.2, PAGE_W * 0.09, geom.maze_height * icon_scale)
+
+    def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
+        factor = 0.5 + (gap / size)
+        cx, cy = icon_center_from_opening(open_x, open_y, side, size, factor=factor)
+        left = cx - (size / 2)
+        bottom = cy - (size / 2)
+        right = left + size
+        top = bottom + size
+        fits = left >= min_x and right <= max_x and bottom >= min_icon_bottom and top <= max_icon_top
+        return left, bottom, fits
+
+    shared_size = base_icon_size
+    for _ in range(28):
+        s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
+        e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
+        if s_fit and e_fit:
+            break
+        shared_size *= 0.92
+        if shared_size <= PAGE_W * 0.06:
+            break
+
+    s_left, s_bottom, _ = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
+    e_left, e_bottom, _ = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
+    s_left = max(min_x, min(max_x - shared_size, s_left))
+    e_left = max(min_x, min(max_x - shared_size, e_left))
+    s_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, s_bottom))
+    e_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, e_bottom))
+
+    # Disallow icon overlap; both icons must exist distinctly.
+    overlap = not (
+        (s_left + shared_size + 2.0) <= e_left
+        or (e_left + shared_size + 2.0) <= s_left
+        or (s_bottom + shared_size + 2.0) <= e_bottom
+        or (e_bottom + shared_size + 2.0) <= s_bottom
+    )
+    valid = (not overlap) and (entry_side != exit_side)
+    return IconPlacement(s_left, s_bottom, e_left, e_bottom, shared_size, valid)
+
+
 def _draw_maze(
     c: canvas.Canvas,
     maze: Maze,
@@ -345,55 +410,16 @@ def _draw_maze(
                 continue
             c.line(*seg)
 
-    entry_row, entry_col, entry_side = maze.entry_opening
-    exit_row, exit_col, exit_side = maze.exit_opening
-
-    start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
-    end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
-
-    base_icon_size = max(geom.cell_size * 3.2, geom.maze_height * icon_scale)
-
-    margin = 10.0
-    gap = 5.0
-    max_icon_top = min(layout.maze_top - 8.0, PAGE_H - margin)
-    min_icon_bottom = margin
-    min_x = margin
-    max_x = PAGE_W - margin
-
-    def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
-        """Return aligned box at fixed size and whether it fits without clamping."""
-        factor = 0.5 + (gap / size)
-        cx, cy = icon_center_from_opening(open_x, open_y, side, size, factor=factor)
-        left = cx - (size / 2)
-        bottom = cy - (size / 2)
-        right = left + size
-        top = bottom + size
-        fits = left >= min_x and right <= max_x and bottom >= min_icon_bottom and top <= max_icon_top
-        return left, bottom, fits
-
-    # Choose ONE shared icon size that works for both entry and exit on this page.
-    shared_size = base_icon_size
-    for _ in range(24):
-        _, _, start_fits = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
-        _, _, end_fits = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
-        if start_fits and end_fits:
-            break
-        shared_size *= 0.92
-        if shared_size <= geom.cell_size * 2.0:
-            break
-
-    start_left, start_bottom, _ = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
-    end_left, end_bottom, _ = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
-
-    # Last-resort clamp with same size for both icons.
-    start_left = max(min_x, min(max_x - shared_size, start_left))
-    end_left = max(min_x, min(max_x - shared_size, end_left))
-    start_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, start_bottom))
-    end_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, end_bottom))
+    icon_place = _resolve_icon_placement(maze, layout, geom, icon_scale)
+    start_left, start_bottom = icon_place.start_left, icon_place.start_bottom
+    end_left, end_bottom = icon_place.end_left, icon_place.end_bottom
+    shared_size = icon_place.size
 
     # Final validation guards.
     if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
         raise ValueError("Maze geometry escaped reserved vertical zone.")
+    if not icon_place.valid:
+        raise ValueError("Icon placement invalid (overlap or side conflict).")
 
     _draw_icon(
         c,
@@ -486,6 +512,17 @@ def build_book(
             candidate.difficulty = diff_name
             candidate_path = solve_maze(candidate)
             if not candidate_path:
+                continue
+            candidate_geom = compute_maze_geometry(
+                candidate,
+                page_width=PAGE_W,
+                page_height=PAGE_H,
+                region_x=layout.maze_region_x,
+                region_y=layout.maze_region_y,
+                region_w=layout.maze_region_w,
+                region_h=layout.maze_region_h,
+            )
+            if not _resolve_icon_placement(candidate, layout, candidate_geom, icon_scale).valid:
                 continue
             sig = maze_signature(candidate)
             if sig in seen_signatures:
