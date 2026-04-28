@@ -4,6 +4,7 @@
   "layout_mode": "publication_centered",
   "page_margin": 0.05,
   "maze_padding": 0.04,
+  "icon_scale": 0.2,
   "output_file": "Maze_Puzzle_Book.pdf",
   "difficulty_profiles": {
     "easy": {
