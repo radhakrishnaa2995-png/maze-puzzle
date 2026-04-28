@@ -20,6 +20,8 @@ class Maze:
     end: Cell
     start_open_side: str
     end_open_side: str
+    entry_opening: tuple[int, int, str]
+    exit_opening: tuple[int, int, str]
     difficulty: str
 
     @property
@@ -216,5 +218,7 @@ def generate_maze(
         end=end,
         start_open_side=start_side,
         end_open_side=end_side,
+        entry_opening=(start[0], start[1], start_side),
+        exit_opening=(end[0], end[1], end_side),
         difficulty="",
     )
