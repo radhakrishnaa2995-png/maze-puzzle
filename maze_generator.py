@@ -88,6 +88,12 @@ def _boundary_sides(cell: Cell, active: Set[Cell], rows: int, cols: int) -> List
     return sides
 
 
+def _active_bounds(active: Set[Cell]) -> tuple[int, int, int, int]:
+    rows = [r for r, _ in active]
+    cols = [c for _, c in active]
+    return min(rows), max(rows), min(cols), max(cols)
+
+
 def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[int, int], preferred: tuple[str, str]) -> tuple[Cell, str]:
     tr, tc = target
     candidates: list[tuple[int, Cell, List[str]]] = []
@@ -112,7 +118,17 @@ def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[int, in
 
 def _pick_opening_on_side(active: Set[Cell], rows: int, cols: int, side: str, target_row: int) -> tuple[Cell, str]:
     candidates: list[tuple[int, Cell]] = []
+    min_row, max_row, min_col, max_col = _active_bounds(active)
     for cell in active:
+        r, c = cell
+        if side == "W" and c != min_col:
+            continue
+        if side == "E" and c != max_col:
+            continue
+        if side == "N" and r != min_row:
+            continue
+        if side == "S" and r != max_row:
+            continue
         sides = _boundary_sides(cell, active, rows, cols)
         if side in sides:
             candidates.append((abs(cell[0] - target_row), cell))
@@ -125,13 +141,38 @@ def _pick_opening_on_side(active: Set[Cell], rows: int, cols: int, side: str, ta
 
 
 def _pick_corner_opening(active: Set[Cell], rows: int, cols: int, corner: str) -> tuple[Cell, str]:
-    corner_targets: dict[str, tuple[tuple[int, int], tuple[str, str]]] = {
-        "tl": ((0, 0), ("N", "W")),
-        "tr": ((0, cols - 1), ("N", "E")),
-        "bl": ((rows - 1, 0), ("S", "W")),
-        "br": ((rows - 1, cols - 1), ("S", "E")),
+    min_row, max_row, min_col, max_col = _active_bounds(active)
+    corner_specs = {
+        "tl": ((min_row, min_col), ("N", "W")),
+        "tr": ((min_row, max_col), ("N", "E")),
+        "bl": ((max_row, min_col), ("S", "W")),
+        "br": ((max_row, max_col), ("S", "E")),
     }
-    target, preferred = corner_targets[corner]
+    target, preferred = corner_specs[corner]
+    candidates: list[tuple[int, Cell, List[str]]] = []
+    for cell in active:
+        r, c = cell
+        if corner == "tl" and not (r == min_row or c == min_col):
+            continue
+        if corner == "tr" and not (r == min_row or c == max_col):
+            continue
+        if corner == "bl" and not (r == max_row or c == min_col):
+            continue
+        if corner == "br" and not (r == max_row or c == max_col):
+            continue
+        sides = _boundary_sides(cell, active, rows, cols)
+        if not sides:
+            continue
+        dist = abs(r - target[0]) + abs(c - target[1])
+        candidates.append((dist, cell, sides))
+
+    candidates.sort(key=lambda x: x[0])
+    for _dist, cell, sides in candidates:
+        for pref in preferred:
+            if pref in sides:
+                return cell, pref
+    if candidates:
+        return candidates[0][1], candidates[0][2][0]
     return _pick_opening(active, rows, cols, target, preferred)
 
 
