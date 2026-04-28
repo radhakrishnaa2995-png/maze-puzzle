@@ -24,6 +24,7 @@ def main() -> None:
 
     icon_dir = str(cfg.get("icon_dir", "assets/icons"))
     pages_per_book = int(cfg.get("pages_per_book", 15))
+    layout_mode = str(cfg.get("layout_mode", "flow_masked"))
 
     pairs = load_icon_pairs(icon_dir)
     pages = max(len(pairs), max(1, pages_per_book))
@@ -39,6 +40,7 @@ def main() -> None:
         icon_dir=icon_dir,
     )
 
+    print(f"Layout mode: {layout_mode}")
     print(f"Generated {out_path}")
 
 
