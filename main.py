@@ -31,6 +31,7 @@ def main() -> None:
     seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
     output_file = str(cfg.get("output_file", OUTPUT_FILE))
     out_path = os.path.join(OUTPUT_DIR, output_file)
+    difficulty_profiles = cfg.get("difficulty_profiles", {})
 
     build_book(
         output_file=out_path,
@@ -38,6 +39,7 @@ def main() -> None:
         seed=seed,
         title="Scene Maze Puzzle Book",
         icon_dir=icon_dir,
+        difficulty_profiles=difficulty_profiles,
     )
 
     print(f"Generated {out_path}")
