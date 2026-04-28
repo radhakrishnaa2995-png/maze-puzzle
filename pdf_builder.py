@@ -28,7 +28,7 @@ PAD_X = 0.06
 PAD_Y = 0.08
 MAZE_INNER_PAD = 0.04
 HEADER_H = 0.060
-STORY_H = 0.032
+STORY_H = 0.060
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -231,11 +231,11 @@ def _title_and_story(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, dif
 
     c.setFillColor(colors.HexColor("#0F172A"))
     c.setFont("Helvetica-Bold", 24)
-    c.drawString(layout.left, layout.story_y + 12, pair.title)
+    c.drawString(layout.left, layout.story_y + 20, pair.title)
 
     c.setFont("Helvetica-Bold", 13)
     story = STORIES.get(pair.key, "Can you solve this maze?")
-    c.drawString(layout.left, layout.story_y - 4, story.upper())
+    c.drawString(layout.left, layout.story_y + 2, story.upper())
 
 
 def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple[float, float]:
