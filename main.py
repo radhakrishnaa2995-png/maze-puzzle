@@ -4,41 +4,51 @@ from pdf_builder import MazePDFBuilder
 def main():
     pdf = MazePDFBuilder()
     
-    # Themes matching the requested pastel/header style
+    # Story-based themes with strict 2-color palettes
     themes = [
         {
-            "main_title": "Pirate Maze", 
-            "sub_title": "GUIDE THE PIRATE SHIP TO THE TREASURE CHEST!",
-            "bg_color": (255, 245, 200), # Light Yellow Pastel
-            "head_color": (220, 40, 120), # Pink/Magenta Header
-            "start": "pirate_ship.png", "end": "treasure.png"
+            "title": "Pirate Maze", 
+            "instruction": "GUIDE THE PIRATE SHIP TO THE TREASURE CHEST!",
+            "bg_color": (255, 248, 200), # Pastel Yellow
+            "head_color": (199, 21, 133), # Solid Pink
+            "start_img": "assets/pirate_ship.png", 
+            "end_img": "assets/treasure.png"
         },
         {
-            "main_title": "Car Maze", 
-            "sub_title": "HELP THE CAR REACH THE GARAGE BEFORE IT RUNS OUT OF FUEL!",
-            "bg_color": (220, 235, 255), # Light Blue Pastel
-            "head_color": (230, 80, 0),   # Orange Header
-            "start": "car.png", "end": "garage.png"
+            "title": "Car Maze", 
+            "instruction": "HELP THE CAR REACH THE GARAGE BEFORE IT RUNS OUT OF FUEL!",
+            "bg_color": (225, 240, 255), # Pastel Blue
+            "head_color": (210, 70, 0),   # Solid Orange
+            "start_img": "assets/car.png", 
+            "end_img": "assets/garage.png"
+        },
+        {
+            "title": "Space Journey", 
+            "instruction": "HELP THE ROCKET REACH THE PLANET!",
+            "bg_color": (240, 225, 255), # Pastel Purple
+            "head_color": (75, 0, 130),   # Solid Indigo
+            "start_img": "assets/rocket.png", 
+            "end_img": "assets/planet.png"
         }
     ]
 
-    for i in range(1, 11):
+    for i in range(1, 13): # Generate 12 pages
         theme = themes[(i-1) % len(themes)]
-        cols, rows = 21, 25
+        cols, rows = 23, 27 # Odd numbers work best
         
-        # Entry/Exit points at edges
-        entry = (0, rows // 2)
-        exit_pt = (cols - 1, rows // 2)
+        # Vary entry/exit points per page
+        if i % 2 == 0:
+            entry, exit_pt = (0, 5), (cols-1, rows-6)
+        else:
+            entry, exit_pt = (5, 0), (cols-10, rows-1)
         
         mg = MazeGenerator(cols, rows)
         grid = mg.generate(entry, exit_pt)
         
-        pdf.add_maze_page(
-            grid, theme, i, entry, exit_pt,
-            f"assets/{theme['start']}", f"assets/{theme['end']}"
-        )
+        pdf.add_maze_page(grid, theme, i, entry, exit_pt)
 
-    pdf.output("Custom_Maze_Book.pdf")
+    pdf.output("Professional_Story_Maze_Book.pdf")
+    print("PDF Created: Professional_Story_Maze_Book.pdf")
 
 if __name__ == "__main__":
     main()
