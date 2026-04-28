@@ -230,12 +230,12 @@ def _title_and_story(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, dif
         _draw_star(c, star_base_x + (i * 17), star_y + 3, 5.5)
 
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 21)
+    c.setFont("Helvetica-Bold", 24)
     c.drawString(layout.left, layout.story_y + 12, pair.title)
 
-    c.setFont("Helvetica-Oblique", 11)
+    c.setFont("Helvetica-Bold", 13)
     story = STORIES.get(pair.key, "Can you solve this maze?")
-    c.drawString(layout.left, layout.story_y - 2, f'"{story}"')
+    c.drawString(layout.left, layout.story_y - 4, story.upper())
 
 
 def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple[float, float]:
@@ -275,7 +275,15 @@ def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, max_w: float, 
         c.roundRect(cx - (max_w / 2), cy - (max_h / 2), max_w, max_h, 10, fill=1, stroke=0)
 
 
-def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool, path: list[tuple[int, int]] | None, pair: IconPair) -> None:
+def _draw_maze(
+    c: canvas.Canvas,
+    maze: Maze,
+    layout: Layout,
+    show_solution: bool,
+    path: list[tuple[int, int]] | None,
+    pair: IconPair,
+    icon_scale: float,
+) -> None:
     geom = compute_maze_geometry(
         maze,
         page_width=PAGE_W,
@@ -335,17 +343,16 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
     start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
     end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
 
-    icon_size = geom.maze_height * 0.18
-    small_gap = 5.0
+    icon_size = geom.maze_height * icon_scale
 
     def icon_box_for_side(open_x: float, open_y: float, side: str) -> tuple[float, float]:
         if side == "W":
-            return open_x - icon_size - small_gap, open_y - (icon_size / 2)
+            return open_x - icon_size, open_y - (icon_size / 2)
         if side == "E":
-            return open_x + small_gap, open_y - (icon_size / 2)
+            return open_x, open_y - (icon_size / 2)
         if side == "N":
-            return open_x - (icon_size / 2), open_y - icon_size + small_gap
-        return open_x - (icon_size / 2), open_y + small_gap
+            return open_x - (icon_size / 2), open_y - icon_size
+        return open_x - (icon_size / 2), open_y
 
     start_left, start_bottom = icon_box_for_side(start_open_x, start_open_y, entry_side)
     end_left, end_bottom = icon_box_for_side(end_open_x, end_open_y, exit_side)
@@ -397,6 +404,7 @@ def build_book(
     icon_dir: str = "assets/icons",
     difficulty_profiles: dict[str, Any] | None = None,
     shape_dir: str | None = None,
+    icon_scale: float = 0.2,
 ) -> None:
     # Backward compatibility for older call sites that still pass shape_dir.
     if shape_dir:
@@ -459,7 +467,7 @@ def build_book(
 
         _draw_page_frame(c, bg_order[page_no - 1], layout)
         _title_and_story(c, ACCENTS[idx % len(ACCENTS)], idx + 1, diff_name, pair, layout)
-        _draw_maze(c, maze, layout, show_solution=False, path=None, pair=pair)
+        _draw_maze(c, maze, layout, show_solution=False, path=None, pair=pair, icon_scale=icon_scale)
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
@@ -475,7 +483,7 @@ def build_book(
         page_no = solution_title_page + i
         _draw_page_frame(c, bg_order[(solution_title_page + i - 1) % len(bg_order)], layout)
         _title_and_story(c, ACCENTS[(i - 1) % len(ACCENTS)], puzzle.puzzle_number, puzzle.difficulty, puzzle.pair, layout)
-        _draw_maze(c, puzzle.maze, layout, show_solution=True, path=puzzle.solution, pair=puzzle.pair)
+        _draw_maze(c, puzzle.maze, layout, show_solution=True, path=puzzle.solution, pair=puzzle.pair, icon_scale=icon_scale)
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
