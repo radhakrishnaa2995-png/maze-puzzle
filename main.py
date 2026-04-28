@@ -1,52 +1,44 @@
 from maze_generator import MazeGenerator
 from pdf_builder import MazePDFBuilder
 
-def get_rotation_coords(page_num, cols, rows):
-    """FIX 3: Rotation patterns for variety."""
-    pattern = page_num % 4
-    if pattern == 1: # TOP-LEFT to BOTTOM-RIGHT
-        return (1, 0), (cols - 2, rows - 1)
-    elif pattern == 2: # TOP-RIGHT to BOTTOM-LEFT
-        return (cols - 2, 0), (1, rows - 1)
-    elif pattern == 3: # LEFT to RIGHT
-        return (0, rows // 2), (cols - 1, rows // 2)
-    else: # TOP to BOTTOM
-        return (cols // 2, 0), (cols // 2, rows - 1)
-
 def main():
     pdf = MazePDFBuilder()
-    # Maze dimensions (Must be ODD numbers for proper wall logic)
-    cols, rows = 21, 25 
     
+    # Themes matching the requested pastel/header style
     themes = [
-        {"title": "HELP THE CAR REACH THE GARAGE!", "start": "car.png", "end": "car garage.png"},
-        {"title": "HELP THE SHIP FIND THE TREASURE!", "start": "pirates ship.png", "end": "planet.jpg"},
-        {"title": "HELP THE ROCKET REACH MARS!", "start": "rocket.png", "end": "planet.jpg"},
-        {"title": "HELP THE CAT FIND THE MILK!", "start": "cat.png", "end": "milk bowl.png"}
+        {
+            "main_title": "Pirate Maze", 
+            "sub_title": "GUIDE THE PIRATE SHIP TO THE TREASURE CHEST!",
+            "bg_color": (255, 245, 200), # Light Yellow Pastel
+            "head_color": (220, 40, 120), # Pink/Magenta Header
+            "start": "pirate_ship.png", "end": "treasure.png"
+        },
+        {
+            "main_title": "Car Maze", 
+            "sub_title": "HELP THE CAR REACH THE GARAGE BEFORE IT RUNS OUT OF FUEL!",
+            "bg_color": (220, 235, 255), # Light Blue Pastel
+            "head_color": (230, 80, 0),   # Orange Header
+            "start": "car.png", "end": "garage.png"
+        }
     ]
 
-    for i in range(1, 11): # Generate 10 professional pages
+    for i in range(1, 11):
         theme = themes[(i-1) % len(themes)]
+        cols, rows = 21, 25
         
-        # Get Pattern (FIX 3)
-        entry, exit = get_rotation_coords(i, cols, rows)
+        # Entry/Exit points at edges
+        entry = (0, rows // 2)
+        exit_pt = (cols - 1, rows // 2)
         
-        # Generate Maze Logic (FIX 4 & 9)
         mg = MazeGenerator(cols, rows)
-        grid = mg.generate(entry, exit, loop_factor=0.12)
+        grid = mg.generate(entry, exit_pt)
         
-        # Build PDF Page (FIX 11 Validation is inside the builder)
         pdf.add_maze_page(
-            grid, 
-            theme["title"], 
-            entry, 
-            exit, 
-            f"assets/icons/icons/{theme['start']}", 
-            f"assets/icons/icons/{theme['end']}"
+            grid, theme, i, entry, exit_pt,
+            f"assets/{theme['start']}", f"assets/{theme['end']}"
         )
 
-    pdf.output("Professional_Children_Maze_Book.pdf")
-    print("✅ Success: Professional PDF generated with centered layout and clamped icons.")
+    pdf.output("Custom_Maze_Book.pdf")
 
 if __name__ == "__main__":
     main()
