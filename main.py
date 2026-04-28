@@ -33,6 +33,10 @@ def main() -> None:
     out_path = os.path.join(OUTPUT_DIR, output_file)
     difficulty_profiles = cfg.get("difficulty_profiles", {})
     icon_scale = float(cfg.get("icon_scale", 0.2))
+    anchor_cycle = cfg.get(
+        "entry_exit_cycle",
+        [["tl", "br"], ["tr", "bl"], ["left", "right"], ["top", "bottom"]],
+    )
 
     build_book(
         output_file=out_path,
@@ -42,6 +46,7 @@ def main() -> None:
         icon_dir=icon_dir,
         difficulty_profiles=difficulty_profiles,
         icon_scale=icon_scale,
+        anchor_cycle=anchor_cycle,
     )
 
     print(f"Generated {out_path}")
