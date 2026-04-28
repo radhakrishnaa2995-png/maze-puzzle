@@ -28,8 +28,8 @@ PAD_X = 0.06
 PAD_Y = 0.08
 HEADER_H_PX = 110.0
 BOTTOM_MARGIN_PX = 50.0
-MAZE_TARGET_W_RATIO = 0.75
-MAZE_TARGET_H_RATIO = 0.68
+MAZE_TARGET_W_RATIO = 0.66
+MAZE_TARGET_H_RATIO = 0.62
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -307,8 +307,8 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     min_x = margin
     max_x = PAGE_W - margin
 
-    # Slightly larger fixed target while staying page-safe.
-    base_icon_size = max(geom.cell_size * 3.45, PAGE_W * 0.105, geom.maze_height * icon_scale)
+    # Bigger icon target to match large reference style.
+    base_icon_size = max(geom.cell_size * 3.8, PAGE_W * 0.14, geom.maze_height * icon_scale)
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
         factor = 0.5 + (gap / size)
@@ -321,21 +321,20 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
         return left, bottom, fits
 
     shared_size = base_icon_size
+    s_left = s_bottom = e_left = e_bottom = 0.0
+    found_fit = False
     for _ in range(28):
         s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
         e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
         if s_fit and e_fit:
+            found_fit = True
             break
         shared_size *= 0.92
         if shared_size <= PAGE_W * 0.06:
             break
-
-    s_left, s_bottom, _ = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
-    e_left, e_bottom, _ = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
-    s_left = max(min_x, min(max_x - shared_size, s_left))
-    e_left = max(min_x, min(max_x - shared_size, e_left))
-    s_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, s_bottom))
-    e_bottom = max(min_icon_bottom, min(max_icon_top - shared_size, e_bottom))
+    if not found_fit:
+        # Strict rule: do not clamp into maze/page interior; reject candidate and regenerate.
+        return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
     # Disallow icon overlap; both icons must exist distinctly.
     overlap = not (
@@ -474,7 +473,7 @@ def build_book(
     if difficulty_profiles is None:
         difficulty_profiles = DEFAULT_DIFFICULTY_PROFILES
     if anchor_cycle is None:
-        anchor_cycle = [["tl", "br"], ["tr", "bl"], ["left", "right"], ["top", "bottom"]]
+        anchor_cycle = [["tl", "br"], ["tr", "bl"], ["left", "right"], ["right", "left"]]
 
     rng = random.Random(seed)
     c = canvas.Canvas(output_file, pagesize=A4)
@@ -532,13 +531,32 @@ def build_book(
             break
 
         if maze is None:
-            prng = _unique_rng(seed, page_no, pair.key, diff_name, 999)
-            custom_pair = anchor_cycle[idx % len(anchor_cycle)]
-            start_anchor, end_anchor = custom_pair[0], custom_pair[1]
-            maze = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
-            maze.difficulty = diff_name
-            solution = solve_maze(maze)
-            sig = maze_signature(maze)
+            for backup_attempt in range(200, 320):
+                prng = _unique_rng(seed, page_no, pair.key, diff_name, backup_attempt)
+                custom_pair = anchor_cycle[idx % len(anchor_cycle)]
+                start_anchor, end_anchor = custom_pair[0], custom_pair[1]
+                candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
+                candidate.difficulty = diff_name
+                candidate_path = solve_maze(candidate)
+                if not candidate_path:
+                    continue
+                candidate_geom = compute_maze_geometry(
+                    candidate,
+                    page_width=PAGE_W,
+                    page_height=PAGE_H,
+                    region_x=layout.maze_region_x,
+                    region_y=layout.maze_region_y,
+                    region_w=layout.maze_region_w,
+                    region_h=layout.maze_region_h,
+                )
+                if not _resolve_icon_placement(candidate, layout, candidate_geom, icon_scale).valid:
+                    continue
+                maze = candidate
+                solution = candidate_path
+                sig = maze_signature(candidate)
+                break
+            if maze is None:
+                raise RuntimeError(f"Unable to place non-overlapping large icons for page {page_no}.")
 
         seen_signatures.add(sig)
         puzzles.append(PuzzlePage(idx + 1, pair, maze, solution, diff_name))
