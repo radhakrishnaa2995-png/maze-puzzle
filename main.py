@@ -32,6 +32,7 @@ def main() -> None:
     output_file = str(cfg.get("output_file", OUTPUT_FILE))
     out_path = os.path.join(OUTPUT_DIR, output_file)
     difficulty_profiles = cfg.get("difficulty_profiles", {})
+    icon_scale = float(cfg.get("icon_scale", 0.2))
 
     build_book(
         output_file=out_path,
@@ -40,6 +41,7 @@ def main() -> None:
         title="Scene Maze Puzzle Book",
         icon_dir=icon_dir,
         difficulty_profiles=difficulty_profiles,
+        icon_scale=icon_scale,
     )
 
     print(f"Generated {out_path}")
