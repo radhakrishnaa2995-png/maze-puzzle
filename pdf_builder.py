@@ -26,9 +26,10 @@ PAGE_W, PAGE_H = A4
 
 PAD_X = 0.06
 PAD_Y = 0.08
-MAZE_INNER_PAD = 0.04
-HEADER_H = 0.060
-STORY_H = 0.060
+HEADER_H_PX = 110.0
+BOTTOM_MARGIN_PX = 50.0
+MAZE_TARGET_W_RATIO = 0.78
+MAZE_TARGET_H_RATIO = 0.70
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -79,6 +80,8 @@ class Layout:
     top: float
     header_y: float
     story_y: float
+    maze_top: float
+    maze_bottom: float
     maze_region_x: float
     maze_region_y: float
     maze_region_w: float
@@ -114,13 +117,16 @@ def _layout() -> Layout:
     bottom = PAGE_H * PAD_Y
     top = PAGE_H * (1 - PAD_Y)
 
-    header_y = top - (PAGE_H * HEADER_H)
-    story_y = header_y - (PAGE_H * STORY_H)
+    title_h = min(110.0, max(90.0, HEADER_H_PX))
+    header_y = PAGE_H - title_h
+    story_y = header_y - 28.0
+    maze_top = PAGE_H - title_h
+    maze_bottom = max(BOTTOM_MARGIN_PX, bottom)
 
-    maze_region_w = PAGE_W * 0.78
-    maze_region_h = PAGE_H * 0.65
+    maze_region_w = PAGE_W * MAZE_TARGET_W_RATIO
+    maze_region_h = min(PAGE_H * MAZE_TARGET_H_RATIO, maze_top - maze_bottom - 6.0)
     maze_region_x = (PAGE_W - maze_region_w) / 2
-    maze_region_y = (PAGE_H - maze_region_h) / 2
+    maze_region_y = maze_bottom + ((maze_top - maze_bottom - maze_region_h) / 2)
 
     return Layout(
         left=left,
@@ -129,6 +135,8 @@ def _layout() -> Layout:
         top=top,
         header_y=header_y,
         story_y=story_y,
+        maze_top=maze_top,
+        maze_bottom=maze_bottom,
         maze_region_x=maze_region_x,
         maze_region_y=maze_region_y,
         maze_region_w=maze_region_w,
@@ -214,28 +222,28 @@ def _draw_instructions(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> No
 
 
 def _title_and_story(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficulty: str, pair: IconPair, layout: Layout) -> None:
-    title_h = PAGE_H * 0.056
+    title_h = 42.0
     c.setFillColor(accent)
-    c.roundRect(layout.left, layout.header_y, layout.right - layout.left, title_h, 12, fill=1, stroke=0)
+    c.roundRect(layout.left, layout.header_y + 56.0, layout.right - layout.left, title_h, 12, fill=1, stroke=0)
 
     line_text = f"Puzzle {puzzle_no} • {difficulty}"
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(layout.left + 16, layout.header_y + (title_h * 0.54), line_text)
+    c.drawString(layout.left + 16, layout.header_y + 56.0 + (title_h * 0.54), line_text)
 
     star_count = _difficulty_stars_count(difficulty)
     star_base_x = layout.left + 16 + (len(line_text) * 7.2) + 12
-    star_y = layout.header_y + (title_h * 0.55)
+    star_y = layout.header_y + 56.0 + (title_h * 0.55)
     for i in range(star_count):
         _draw_star(c, star_base_x + (i * 17), star_y + 3, 5.5)
 
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(layout.left, layout.story_y + 20, pair.title)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(layout.left, layout.story_y + 18, pair.title)
 
     c.setFont("Helvetica-Bold", 13)
     story = STORIES.get(pair.key, "Can you solve this maze?")
-    c.drawString(layout.left, layout.story_y + 2, story.upper())
+    c.drawString(layout.left, layout.story_y, story.upper())
 
 
 def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple[float, float]:
@@ -343,7 +351,7 @@ def _draw_maze(
     start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
     end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
 
-    icon_size = geom.maze_height * icon_scale
+    icon_size = max(geom.cell_size * 3.2, geom.maze_height * icon_scale)
 
     def icon_box_for_side(open_x: float, open_y: float, side: str) -> tuple[float, float]:
         if side == "W":
@@ -356,6 +364,19 @@ def _draw_maze(
 
     start_left, start_bottom = icon_box_for_side(start_open_x, start_open_y, entry_side)
     end_left, end_bottom = icon_box_for_side(end_open_x, end_open_y, exit_side)
+
+    # Clamp icons to page bounds while keeping clear of title/story blocks.
+    margin = 10.0
+    min_icon_y = max(margin, layout.maze_bottom - icon_size - 8.0)
+    max_icon_y = min(layout.maze_top - icon_size - 8.0, PAGE_H - icon_size - margin)
+    start_left = max(margin, min(PAGE_W - icon_size - margin, start_left))
+    end_left = max(margin, min(PAGE_W - icon_size - margin, end_left))
+    start_bottom = max(min_icon_y, min(max_icon_y, start_bottom))
+    end_bottom = max(min_icon_y, min(max_icon_y, end_bottom))
+
+    # Final validation guards.
+    if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
+        raise ValueError("Maze geometry escaped reserved vertical zone.")
 
     _draw_icon(c, str(pair.start_path), start_left + (icon_size / 2), start_bottom + (icon_size / 2), icon_size, icon_size)
     _draw_icon(c, str(pair.finish_path), end_left + (icon_size / 2), end_bottom + (icon_size / 2), icon_size, icon_size)
@@ -387,6 +408,7 @@ def build_book(
     difficulty_profiles: dict[str, Any] | None = None,
     shape_dir: str | None = None,
     icon_scale: float = 0.2,
+    anchor_cycle: list[list[str]] | None = None,
 ) -> None:
     # Backward compatibility for older call sites that still pass shape_dir.
     if shape_dir:
@@ -394,6 +416,8 @@ def build_book(
 
     if difficulty_profiles is None:
         difficulty_profiles = DEFAULT_DIFFICULTY_PROFILES
+    if anchor_cycle is None:
+        anchor_cycle = [["tl", "br"], ["tr", "bl"], ["left", "right"], ["top", "bottom"]]
 
     rng = random.Random(seed)
     c = canvas.Canvas(output_file, pagesize=A4)
@@ -425,7 +449,9 @@ def build_book(
 
         for attempt in range(36):
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
-            candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor="left", end_anchor="right")
+            custom_pair = anchor_cycle[idx % len(anchor_cycle)]
+            start_anchor, end_anchor = custom_pair[0], custom_pair[1]
+            candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
             candidate.difficulty = diff_name
             candidate_path = solve_maze(candidate)
             if not candidate_path:
@@ -439,7 +465,9 @@ def build_book(
 
         if maze is None:
             prng = _unique_rng(seed, page_no, pair.key, diff_name, 999)
-            maze = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor="left", end_anchor="right")
+            custom_pair = anchor_cycle[idx % len(anchor_cycle)]
+            start_anchor, end_anchor = custom_pair[0], custom_pair[1]
+            maze = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
             maze.difficulty = diff_name
             solution = solve_maze(maze)
             sig = maze_signature(maze)
