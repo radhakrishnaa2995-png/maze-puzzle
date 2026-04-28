@@ -1,7 +1,7 @@
 # pdf_builder.py
 """Publication-ready scene maze puzzle book PDF builder."""
 
-from _future_ import annotations
+from __future__ import annotations
 
 import math
 import random
@@ -504,7 +504,7 @@ def build_book(
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.62, "You Did Amazing!")
     c.setFont("Helvetica", 14)
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.54, "Great job solving the mazes!")
-    c.drawString(layout.left + 24, PAGE_H * 0.38, "Name: __________")
+    c.drawString(layout.left + 24, PAGE_H * 0.38, "Name: ______________________________")
     _draw_bottom_page_no(c, final_page_no)
     c.showPage()
 
