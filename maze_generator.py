@@ -1,4 +1,4 @@
-"""Masked full-page scene-maze generation utilities."""
+"""Masked full-page scene-maze generation utilities with algorithm variation."""
 
 from __future__ import annotations
 
@@ -51,26 +51,29 @@ def _neighbors(cell: Cell, rows: int, cols: int) -> List[tuple[str, Cell]]:
     return out
 
 
-def _allowed_mask(rows: int, cols: int) -> Set[Cell]:
-    """Centered, flowing worksheet mask that avoids icon zones."""
-    allowed: Set[Cell] = set()
+def _allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) -> Set[Cell]:
+    """Create large masks with light edge carving so mazes stay page-dominant yet unique."""
+    allowed: Set[Cell] = {(r, c) for r in range(rows) for c in range(cols)}
 
-    for r in range(rows):
-        for c in range(cols):
-            x = (c + 0.5) / cols
-            y = (r + 0.5) / rows
+    # Edge bays vary silhouette without shrinking maze occupancy too much.
+    bay_count = {"easy": 2, "medium": 3, "hard": 4}.get(profile, 3)
+    for _ in range(bay_count):
+        side = rng.choice(["N", "S", "W", "E"])
+        depth = rng.randint(1, max(2, rows // 10 if side in {"N", "S"} else cols // 10))
+        span = rng.randint(max(3, cols // 8 if side in {"N", "S"} else rows // 8), max(4, cols // 4 if side in {"N", "S"} else rows // 4))
 
-            in_start_zone = x < 0.24 and y < 0.30
-            in_finish_zone = x > 0.76 and y > 0.72
-
-            in_main = 0.10 <= x <= 0.90 and 0.12 <= y <= 0.88
-            top_right_arm = x >= 0.30 and y <= 0.62
-            bottom_left_arm = x <= 0.70 and y >= 0.36
-            connector = 0.34 <= y <= 0.64 and 0.28 <= x <= 0.72
-
-            ok = in_main and (top_right_arm or bottom_left_arm or connector) and not in_start_zone and not in_finish_zone
-            if ok:
-                allowed.add((r, c))
+        if side in {"N", "S"}:
+            start_c = rng.randint(1, max(1, cols - span - 1))
+            rr = range(0, depth) if side == "N" else range(rows - depth, rows)
+            for r in rr:
+                for c in range(start_c, min(cols - 1, start_c + span)):
+                    allowed.discard((r, c))
+        else:
+            start_r = rng.randint(1, max(1, rows - span - 1))
+            cc = range(0, depth) if side == "W" else range(cols - depth, cols)
+            for c in cc:
+                for r in range(start_r, min(rows - 1, start_r + span)):
+                    allowed.discard((r, c))
 
     return allowed
 
@@ -144,6 +147,36 @@ def _carve_masked_dfs(
         stack.append(nxt)
 
 
+def _carve_prim(
+    rows: int,
+    cols: int,
+    active: Set[Cell],
+    walls: Dict[Cell, Dict[str, bool]],
+    start: Cell,
+    rng: random.Random,
+    branch_bias: float,
+) -> None:
+    visited: Set[Cell] = {start}
+    frontier: list[tuple[Cell, str, Cell]] = []
+    for side, nxt in _neighbors(start, rows, cols):
+        if nxt in active:
+            frontier.append((start, side, nxt))
+
+    while frontier:
+        idx = 0 if (rng.random() < branch_bias) else rng.randrange(len(frontier))
+        cur, side, nxt = frontier.pop(idx)
+        if nxt in visited:
+            continue
+
+        walls[cur][side] = False
+        walls[nxt][OPPOSITE[side]] = False
+        visited.add(nxt)
+
+        for nside, nn in _neighbors(nxt, rows, cols):
+            if nn in active and nn not in visited:
+                frontier.append((nxt, nside, nn))
+
+
 def _add_loops(active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int, rng: random.Random, loop_factor: float) -> None:
     candidates: list[tuple[Cell, str, Cell]] = []
     for cell in active:
@@ -179,30 +212,68 @@ def generate_maze(
     start_anchor: str = "tl",
     end_anchor: str = "br",
 ) -> Maze:
-    # Difficulty tuning focused on readability.
+    # Difficulty tuning focused on visual differentiation.
     if difficulty_factor <= 0.30:
-        rows = max(16, min(rows, 20))
-        cols = max(20, min(cols, 26))
-        straight_pref = 0.82
-        loop_factor = 0.24
+        profile = "easy"
+        rows = max(14, min(rows + rng.randint(-2, 2), 20))
+        cols = max(18, min(cols + rng.randint(-2, 2), 28))
+        straight_pref = 0.88
+        loop_factor = 0.22
+        branch_bias = 0.68
     elif difficulty_factor <= 0.75:
-        rows = max(22, min(rows, 28))
-        cols = max(28, min(cols, 34))
+        profile = "medium"
+        rows = max(20, min(rows + rng.randint(-2, 3), 30))
+        cols = max(24, min(cols + rng.randint(-3, 3), 36))
         straight_pref = 0.54
         loop_factor = 0.14
+        branch_bias = 0.50
     else:
-        rows = max(28, min(rows, 34))
-        cols = max(34, min(cols, 42))
+        profile = "hard"
+        rows = max(26, min(rows + rng.randint(-3, 4), 36))
+        cols = max(32, min(cols + rng.randint(-3, 4), 44))
         straight_pref = 0.24
         loop_factor = 0.07
+        branch_bias = 0.35
 
-    active = _allowed_mask(rows, cols)
+    active = _allowed_mask(rows, cols, rng, profile)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
-    start, start_side = _pick_opening(active, rows, cols, (int(rows * 0.14), int(cols * 0.24)), ("W", "N"))
-    end, end_side = _pick_opening(active, rows, cols, (int(rows * 0.84), int(cols * 0.86)), ("E", "S"))
+    side_to_target: dict[str, tuple[int, int]] = {
+        "N": (0, cols // 2),
+        "S": (rows - 1, cols // 2),
+        "W": (rows // 2, 0),
+        "E": (rows // 2, cols - 1),
+    }
+    all_sides = ["N", "S", "W", "E"]
+    start_side_pref = rng.choice(all_sides)
+    opposite = {"N": "S", "S": "N", "W": "E", "E": "W"}
+    # Favor opposite-side exits for longer, more satisfying paths.
+    end_candidates = [s for s in all_sides if s != start_side_pref]
+    weighted = [opposite[start_side_pref], opposite[start_side_pref]] + end_candidates
+    end_side_pref = rng.choice(weighted)
 
-    _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
+    start, start_side = _pick_opening(
+        active,
+        rows,
+        cols,
+        side_to_target[start_side_pref],
+        (start_side_pref, "W", "N", "E", "S"),
+    )
+    end, end_side = _pick_opening(
+        active,
+        rows,
+        cols,
+        side_to_target[end_side_pref],
+        (end_side_pref, "E", "S", "W", "N"),
+    )
+
+    algorithm = rng.choice(["dfs", "prim", "biased"])
+    if algorithm == "prim":
+        _carve_prim(rows, cols, active, walls, start, rng, branch_bias=branch_bias)
+    elif algorithm == "biased":
+        _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=max(0.10, straight_pref * 0.72))
+    else:
+        _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
     _add_loops(active, walls, rows, cols, rng, loop_factor)
 
     walls[start][start_side] = False
