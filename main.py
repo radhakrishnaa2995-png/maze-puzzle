@@ -1,56 +1,52 @@
-# main.py
-"""Entrypoint for premium Scene Maze Puzzle Book PDF generation."""
+from maze_generator import MazeGenerator
+from pdf_builder import MazePDFBuilder
 
-from __future__ import annotations
+def get_rotation_coords(page_num, cols, rows):
+    """FIX 3: Rotation patterns for variety."""
+    pattern = page_num % 4
+    if pattern == 1: # TOP-LEFT to BOTTOM-RIGHT
+        return (1, 0), (cols - 2, rows - 1)
+    elif pattern == 2: # TOP-RIGHT to BOTTOM-LEFT
+        return (cols - 2, 0), (1, rows - 1)
+    elif pattern == 3: # LEFT to RIGHT
+        return (0, rows // 2), (cols - 1, rows // 2)
+    else: # TOP to BOTTOM
+        return (cols // 2, 0), (cols // 2, rows - 1)
 
-import json
-import os
-import secrets
-import time
+def main():
+    pdf = MazePDFBuilder()
+    # Maze dimensions (Must be ODD numbers for proper wall logic)
+    cols, rows = 21, 25 
+    
+    themes = [
+        {"title": "HELP THE CAR REACH THE GARAGE!", "start": "car.png", "end": "car garage.png"},
+        {"title": "HELP THE SHIP FIND THE TREASURE!", "start": "pirates ship.png", "end": "planet.jpg"},
+        {"title": "HELP THE ROCKET REACH MARS!", "start": "rocket.png", "end": "planet.jpg"},
+        {"title": "HELP THE CAT FIND THE MILK!", "start": "cat.png", "end": "milk bowl.png"}
+    ]
 
-from icons import load_icon_pairs
-from pdf_builder import build_book
+    for i in range(1, 11): # Generate 10 professional pages
+        theme = themes[(i-1) % len(themes)]
+        
+        # Get Pattern (FIX 3)
+        entry, exit = get_rotation_coords(i, cols, rows)
+        
+        # Generate Maze Logic (FIX 4 & 9)
+        mg = MazeGenerator(cols, rows)
+        grid = mg.generate(entry, exit, loop_factor=0.12)
+        
+        # Build PDF Page (FIX 11 Validation is inside the builder)
+        pdf.add_maze_page(
+            grid, 
+            theme["title"], 
+            entry, 
+            exit, 
+            f"assets/icons/icons/{theme['start']}", 
+            f"assets/icons/icons/{theme['end']}"
+        )
 
-OUTPUT_DIR = "output"
-CONFIG_FILE = "config.json"
-OUTPUT_FILE = "Maze_Puzzle_Book.pdf"
-
-
-def main() -> None:
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
-        cfg = json.load(fh)
-
-    icon_dir = str(cfg.get("icon_dir", "assets/icons"))
-    pages_per_book = int(cfg.get("pages_per_book", 15))
-
-    pairs = load_icon_pairs(icon_dir)
-    pages = max(len(pairs), max(1, pages_per_book))
-
-    seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
-    output_file = str(cfg.get("output_file", OUTPUT_FILE))
-    out_path = os.path.join(OUTPUT_DIR, output_file)
-    difficulty_profiles = cfg.get("difficulty_profiles", {})
-    icon_scale = float(cfg.get("icon_scale", 0.2))
-    anchor_cycle = cfg.get(
-        "entry_exit_cycle",
-        [["tl", "br"], ["tr", "bl"], ["left", "right"], ["top", "bottom"]],
-    )
-
-    build_book(
-        output_file=out_path,
-        pages=pages,
-        seed=seed,
-        title="Scene Maze Puzzle Book",
-        icon_dir=icon_dir,
-        difficulty_profiles=difficulty_profiles,
-        icon_scale=icon_scale,
-        anchor_cycle=anchor_cycle,
-    )
-
-    print(f"Generated {out_path}")
-
+    pdf.output("Professional_Children_Maze_Book.pdf")
+    print("✅ Success: Professional PDF generated with centered layout and clamped icons.")
 
 if __name__ == "__main__":
     main()
