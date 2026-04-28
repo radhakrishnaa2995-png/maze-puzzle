@@ -24,8 +24,9 @@ from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
 
-PAD_X = 0.05
-PAD_Y = 0.05
+PAD_X = 0.06
+PAD_Y = 0.08
+MAZE_INNER_PAD = 0.04
 HEADER_H = 0.060
 STORY_H = 0.032
 
@@ -55,9 +56,9 @@ STORIES: Dict[str, str] = {
 }
 
 DEFAULT_DIFFICULTY_PROFILES: dict[str, dict[str, Any]] = {
-    "easy": {"rows_range": [10, 11], "cols_range": [15, 17]},
-    "medium": {"rows_range": [14, 16], "cols_range": [24, 26]},
-    "hard": {"rows_range": [19, 21], "cols_range": [34, 36]},
+    "easy": {"rows_range": [14, 18], "cols_range": [14, 18]},
+    "medium": {"rows_range": [18, 24], "cols_range": [20, 28]},
+    "hard": {"rows_range": [24, 32], "cols_range": [28, 38]},
 }
 
 
@@ -89,17 +90,17 @@ def _difficulty_for_page(page_idx: int, total_pages: int, profiles: dict[str, An
     progress = (page_idx + 1) / max(1, total_pages)
     if progress <= 0.30:
         pr = profiles.get("easy", {})
-        rr = pr.get("rows_range", [10, 11])
-        cr = pr.get("cols_range", [15, 17])
+        rr = pr.get("rows_range", [14, 18])
+        cr = pr.get("cols_range", [14, 18])
         return "Easy", int(rr[0]), int(cr[0]), 0.18
     if progress <= 0.70:
         pr = profiles.get("medium", {})
-        rr = pr.get("rows_range", [14, 16])
-        cr = pr.get("cols_range", [24, 26])
+        rr = pr.get("rows_range", [18, 24])
+        cr = pr.get("cols_range", [20, 28])
         return "Medium", int((rr[0] + rr[1]) / 2), int((cr[0] + cr[1]) / 2), 0.56
     pr = profiles.get("hard", {})
-    rr = pr.get("rows_range", [19, 21])
-    cr = pr.get("cols_range", [34, 36])
+    rr = pr.get("rows_range", [24, 32])
+    cr = pr.get("cols_range", [28, 38])
     return "Hard", int(rr[1]), int(cr[1]), 0.92
 
 
@@ -116,7 +117,7 @@ def _layout() -> Layout:
     header_y = top - (PAGE_H * HEADER_H)
     story_y = header_y - (PAGE_H * STORY_H)
 
-    maze_region_w = PAGE_W * 0.84
+    maze_region_w = PAGE_W * (0.90 - (2 * MAZE_INNER_PAD))
     maze_region_h = PAGE_H * 0.70
     maze_region_x = (PAGE_W - maze_region_w) / 2
     maze_region_y = (PAGE_H - maze_region_h) / 2
@@ -157,9 +158,7 @@ def _icon_plan(pages: int, pairs: list[IconPair], seed: int) -> list[IconPair]:
 def _draw_page_frame(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
-    c.setStrokeColor(colors.HexColor("#1E293B"))
-    c.setLineWidth(1.2)
-    c.roundRect(layout.left, layout.bottom, layout.right - layout.left, layout.top - layout.bottom, 12, fill=0, stroke=1)
+    # Intentionally no page border for a clean full-bleed worksheet look.
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
@@ -336,8 +335,8 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
     start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
     end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
 
-    icon_size = min(layout.maze_region_h * 0.15, max(layout.maze_region_h * 0.10, geom.maze_height * 0.12))
-    small_gap = 7.0
+    icon_size = geom.maze_height * 0.18
+    small_gap = 5.0
 
     def icon_box_for_side(open_x: float, open_y: float, side: str) -> tuple[float, float]:
         if side == "W":
