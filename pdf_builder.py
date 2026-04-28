@@ -308,7 +308,7 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     max_x = PAGE_W - margin
 
     # Bigger icon target to match large reference style.
-    base_icon_size = max(geom.cell_size * 3.8, PAGE_W * 0.14, geom.maze_height * icon_scale)
+    base_icon_size = max(geom.cell_size * 4.2, PAGE_W * 0.17, geom.maze_height * icon_scale)
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
         factor = 0.5 + (gap / size)
@@ -455,6 +455,23 @@ def _unique_rng(seed: int, page: int, theme_key: str, difficulty: str, attempt: 
     return random.Random(int(h[:16], 16))
 
 
+def _corner_bias_pair(index: int, pair: list[str]) -> tuple[str, str]:
+    """Prevent center-side icon placements by biasing side anchors to top/bottom corners."""
+    start, end = pair[0].lower(), pair[1].lower()
+    parity = index % 2
+    start_map = {
+        "left": "tl" if parity == 0 else "bl",
+        "right": "tr" if parity == 0 else "br",
+    }
+    end_map = {
+        "left": "bl" if parity == 0 else "tl",
+        "right": "br" if parity == 0 else "tr",
+    }
+    start_out = start_map.get(start, start)
+    end_out = end_map.get(end, end)
+    return start_out, end_out
+
+
 def build_book(
     output_file: str,
     pages: int,
@@ -506,7 +523,7 @@ def build_book(
         for attempt in range(36):
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
             custom_pair = anchor_cycle[idx % len(anchor_cycle)]
-            start_anchor, end_anchor = custom_pair[0], custom_pair[1]
+            start_anchor, end_anchor = _corner_bias_pair(idx, custom_pair)
             candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
             candidate.difficulty = diff_name
             candidate_path = solve_maze(candidate)
@@ -534,7 +551,7 @@ def build_book(
             for backup_attempt in range(200, 320):
                 prng = _unique_rng(seed, page_no, pair.key, diff_name, backup_attempt)
                 custom_pair = anchor_cycle[idx % len(anchor_cycle)]
-                start_anchor, end_anchor = custom_pair[0], custom_pair[1]
+                start_anchor, end_anchor = _corner_bias_pair(idx, custom_pair)
                 candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
                 candidate.difficulty = diff_name
                 candidate_path = solve_maze(candidate)
