@@ -22,6 +22,13 @@ class Maze:
     end_open_side: str
     difficulty: str
 
+    @property
+    def valid_cells(self) -> Set[Cell]:
+        return self.active_cells
+
+    def is_valid(self, r: int, c: int) -> bool:
+        return (r, c) in self.active_cells
+
 
 DIRS = {
     "N": (-1, 0),
@@ -43,25 +50,27 @@ def _neighbors(cell: Cell, rows: int, cols: int) -> List[tuple[str, Cell]]:
 
 
 def _allowed_mask(rows: int, cols: int) -> Set[Cell]:
-    """Create an irregular worksheet-style region (top-right + bottom-left flow)."""
+    """Centered, flowing worksheet mask that avoids icon zones."""
     allowed: Set[Cell] = set()
 
     for r in range(rows):
         for c in range(cols):
-            # Normalized page position with top-origin y for easier layout reasoning.
             x = (c + 0.5) / cols
             y = (r + 0.5) / rows
 
-            # Reserve icon no-maze zones.
-            in_start_zone = x < 0.26 and y < 0.30   # top-left icon area
-            in_finish_zone = x > 0.76 and y > 0.72  # bottom-right icon area
+            # Blocked icon zones.
+            in_start_zone = x < 0.24 and y < 0.30
+            in_finish_zone = x > 0.76 and y > 0.72
 
-            # Flowing union: top-right arm + bottom-left arm + connector band.
-            top_right_arm = (x >= 0.24) and (y <= 0.62)
-            bottom_left_arm = (x <= 0.90) and (y >= 0.34)
-            connector = (0.36 <= y <= 0.62) and (0.30 <= x <= 0.78)
+            # Main centered footprint (balanced 8-10% padding feel).
+            in_main = 0.12 <= x <= 0.88 and 0.12 <= y <= 0.88
 
-            ok = (top_right_arm or bottom_left_arm or connector) and not in_start_zone and not in_finish_zone
+            # Flow shaping: reinforce top-right and bottom-left travel arms.
+            top_right_arm = x >= 0.30 and y <= 0.62
+            bottom_left_arm = x <= 0.70 and y >= 0.36
+            connector = 0.36 <= y <= 0.62 and 0.30 <= x <= 0.70
+
+            ok = in_main and (top_right_arm or bottom_left_arm or connector) and not in_start_zone and not in_finish_zone
             if ok:
                 allowed.add((r, c))
 
@@ -78,9 +87,9 @@ def _boundary_sides(cell: Cell, active: Set[Cell], rows: int, cols: int) -> List
     return sides
 
 
-def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[float, float], preferred: tuple[str, str]) -> tuple[Cell, str]:
+def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[int, int], preferred: tuple[str, str]) -> tuple[Cell, str]:
     tr, tc = target
-    candidates: list[tuple[float, Cell, List[str]]] = []
+    candidates: list[tuple[int, Cell, List[str]]] = []
     for cell in active:
         sides = _boundary_sides(cell, active, rows, cols)
         if not sides:
@@ -88,18 +97,16 @@ def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[float, 
         dist = abs(cell[0] - tr) + abs(cell[1] - tc)
         candidates.append((dist, cell, sides))
 
-    if not candidates:
-        cell = next(iter(active))
-        return cell, "W"
-
     candidates.sort(key=lambda x: x[0])
-    # nearest boundary cell, prefer requested border side.
     for _dist, cell, sides in candidates:
         for pref in preferred:
             if pref in sides:
                 return cell, pref
-    first = candidates[0]
-    return first[1], first[2][0]
+    if candidates:
+        return candidates[0][1], candidates[0][2][0]
+
+    any_cell = next(iter(active))
+    return any_cell, "W"
 
 
 def _carve_masked_dfs(
@@ -126,8 +133,6 @@ def _carve_masked_dfs(
             stack.pop()
             continue
 
-        side: str
-        nxt: Cell
         if rng.random() < straight_preference and cur in prev_dir:
             straight = [opt for opt in options if opt[0] == prev_dir[cur]]
             side, nxt = rng.choice(straight or options)
@@ -176,31 +181,29 @@ def generate_maze(
     start_anchor: str = "tl",
     end_anchor: str = "br",
 ) -> Maze:
-    rows = max(18, rows)
-    cols = max(24, cols)
+    # Difficulty tuning for readability.
+    if difficulty_factor <= 0.30:
+        rows = max(20, min(rows, 24))
+        cols = max(24, min(cols, 30))
+        straight_pref = 0.78
+        loop_factor = 0.22
+    elif difficulty_factor <= 0.75:
+        rows = max(28, min(rows, 34))
+        cols = max(34, min(cols, 40))
+        straight_pref = 0.50
+        loop_factor = 0.12
+    else:
+        rows = max(34, min(rows, 40))
+        cols = max(42, min(cols, 50))
+        straight_pref = 0.20
+        loop_factor = 0.05
 
     active = _allowed_mask(rows, cols)
-    if len(active) < 10:
-        raise ValueError("Masked maze region is too small")
-
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
-    # Opening targets follow worksheet composition.
-    start_target = (int(rows * 0.16), int(cols * 0.30))
-    end_target = (int(rows * 0.82), int(cols * 0.88))
-    start, start_side = _pick_opening(active, rows, cols, start_target, ("W", "N"))
-    end, end_side = _pick_opening(active, rows, cols, end_target, ("E", "S"))
-
-    # Difficulty profile.
-    if difficulty_factor <= 0.30:  # Easy
-        straight_pref = 0.72
-        loop_factor = 0.20
-    elif difficulty_factor <= 0.75:  # Medium
-        straight_pref = 0.42
-        loop_factor = 0.11
-    else:  # Hard
-        straight_pref = 0.16
-        loop_factor = 0.04
+    # Entrance near upper-left of mask, exit near lower-right of mask.
+    start, start_side = _pick_opening(active, rows, cols, (int(rows * 0.16), int(cols * 0.24)), ("W", "N"))
+    end, end_side = _pick_opening(active, rows, cols, (int(rows * 0.82), int(cols * 0.84)), ("E", "S"))
 
     _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
     _add_loops(active, walls, rows, cols, rng, loop_factor)
