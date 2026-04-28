@@ -553,30 +553,46 @@ def build_book(
             break
 
         if maze is None:
-            for backup_attempt in range(200, 320):
-                prng = _unique_rng(seed, page_no, pair.key, diff_name, backup_attempt)
-                custom_pair = anchor_cycle[idx % len(anchor_cycle)]
-                start_anchor, end_anchor = _corner_bias_pair(idx, custom_pair)
-                candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor)
-                candidate.difficulty = diff_name
-                candidate_path = solve_maze(candidate)
-                if not candidate_path:
-                    continue
-                candidate_geom = compute_maze_geometry(
-                    candidate,
-                    page_width=PAGE_W,
-                    page_height=PAGE_H,
-                    region_x=layout.maze_region_x,
-                    region_y=layout.maze_region_y,
-                    region_w=layout.maze_region_w,
-                    region_h=layout.maze_region_h,
-                )
-                if not _resolve_icon_placement(candidate, layout, candidate_geom, icon_scale).valid:
-                    continue
-                maze = candidate
-                solution = candidate_path
-                sig = maze_signature(candidate)
-                break
+            rescue_pairs = [["tl", "br"], ["tr", "bl"], ["bl", "tr"], ["br", "tl"]]
+            for shrink in (1.0, 0.92, 0.85):
+                rescue_rows = max(12, int(rows * shrink))
+                rescue_cols = max(12, int(cols * shrink))
+                for rp in rescue_pairs:
+                    for backup_attempt in range(200, 280):
+                        prng = _unique_rng(seed, page_no, pair.key, diff_name, backup_attempt)
+                        start_anchor, end_anchor = _corner_bias_pair(idx, rp)
+                        candidate = generate_maze(
+                            rescue_rows,
+                            rescue_cols,
+                            pair.key,
+                            diff_factor,
+                            prng,
+                            start_anchor=start_anchor,
+                            end_anchor=end_anchor,
+                        )
+                        candidate.difficulty = diff_name
+                        candidate_path = solve_maze(candidate)
+                        if not candidate_path:
+                            continue
+                        candidate_geom = compute_maze_geometry(
+                            candidate,
+                            page_width=PAGE_W,
+                            page_height=PAGE_H,
+                            region_x=layout.maze_region_x,
+                            region_y=layout.maze_region_y,
+                            region_w=layout.maze_region_w,
+                            region_h=layout.maze_region_h,
+                        )
+                        if not _resolve_icon_placement(candidate, layout, candidate_geom, icon_scale).valid:
+                            continue
+                        maze = candidate
+                        solution = candidate_path
+                        sig = maze_signature(candidate)
+                        break
+                    if maze is not None:
+                        break
+                if maze is not None:
+                    break
             if maze is None:
                 raise RuntimeError(f"Unable to place non-overlapping large icons for page {page_no}.")
 
