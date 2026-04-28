@@ -26,8 +26,8 @@ PAGE_W, PAGE_H = A4
 
 PAD_X = 0.08
 PAD_Y = 0.08
-HEADER_H = 0.072
-STORY_H = 0.043
+HEADER_H = 0.060
+STORY_H = 0.032
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -55,9 +55,9 @@ STORIES: Dict[str, str] = {
 }
 
 DEFAULT_DIFFICULTY_PROFILES: dict[str, dict[str, Any]] = {
-    "easy": {"rows_range": [14, 20], "cols_range": [18, 28]},
-    "medium": {"rows_range": [20, 30], "cols_range": [24, 36]},
-    "hard": {"rows_range": [26, 36], "cols_range": [32, 44]},
+    "easy": {"rows_range": [10, 12], "cols_range": [15, 18]},
+    "medium": {"rows_range": [14, 17], "cols_range": [24, 28]},
+    "hard": {"rows_range": [18, 22], "cols_range": [34, 40]},
 }
 
 
@@ -89,17 +89,17 @@ def _difficulty_for_page(page_idx: int, total_pages: int, profiles: dict[str, An
     progress = (page_idx + 1) / max(1, total_pages)
     if progress <= 0.30:
         pr = profiles.get("easy", {})
-        rr = pr.get("rows_range", [14, 20])
-        cr = pr.get("cols_range", [18, 28])
+        rr = pr.get("rows_range", [10, 12])
+        cr = pr.get("cols_range", [15, 18])
         return "Easy", int(rr[0]), int(cr[0]), 0.18
     if progress <= 0.70:
         pr = profiles.get("medium", {})
-        rr = pr.get("rows_range", [20, 30])
-        cr = pr.get("cols_range", [24, 36])
+        rr = pr.get("rows_range", [14, 17])
+        cr = pr.get("cols_range", [24, 28])
         return "Medium", int((rr[0] + rr[1]) / 2), int((cr[0] + cr[1]) / 2), 0.56
     pr = profiles.get("hard", {})
-    rr = pr.get("rows_range", [26, 36])
-    cr = pr.get("cols_range", [32, 44])
+    rr = pr.get("rows_range", [18, 22])
+    cr = pr.get("cols_range", [34, 40])
     return "Hard", int(rr[1]), int(cr[1]), 0.92
 
 
@@ -117,9 +117,9 @@ def _layout() -> Layout:
     story_y = header_y - (PAGE_H * STORY_H)
 
     maze_region_w = PAGE_W * 0.82
-    maze_region_h = PAGE_H * 0.60
+    maze_region_h = PAGE_H * 0.66
     maze_region_x = (PAGE_W - maze_region_w) / 2
-    maze_region_y = max(bottom + 2, story_y - maze_region_h - 6)
+    maze_region_y = (PAGE_H - maze_region_h) / 2
 
     return Layout(
         left=left,
@@ -215,7 +215,7 @@ def _draw_instructions(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> No
 
 
 def _title_and_story(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, difficulty: str, pair: IconPair, layout: Layout) -> None:
-    title_h = PAGE_H * 0.062
+    title_h = PAGE_H * 0.056
     c.setFillColor(accent)
     c.roundRect(layout.left, layout.header_y, layout.right - layout.left, title_h, 12, fill=1, stroke=0)
 
@@ -231,10 +231,10 @@ def _title_and_story(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, dif
         _draw_star(c, star_base_x + (i * 17), star_y + 3, 5.5)
 
     c.setFillColor(colors.HexColor("#0F172A"))
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(layout.left, layout.story_y + 16, pair.title)
+    c.setFont("Helvetica-Bold", 21)
+    c.drawString(layout.left, layout.story_y + 12, pair.title)
 
-    c.setFont("Helvetica-Oblique", 12)
+    c.setFont("Helvetica-Oblique", 11)
     story = STORIES.get(pair.key, "Can you solve this maze?")
     c.drawString(layout.left, layout.story_y - 2, f'"{story}"')
 
@@ -293,8 +293,8 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
     if abs(center_x - (PAGE_W / 2)) > PAGE_W * 0.06 or abs(center_y - (PAGE_H / 2)) > PAGE_H * 0.10:
         print("Warning: maze center drift detected; auto-centering has been applied.")
 
-    maze_line_width = max(1.2, geom.cell_size * 0.11)
-    outer_line_width = max(2.3, geom.cell_size * 0.21)
+    maze_line_width = min(1.8, max(1.2, geom.cell_size * 0.10))
+    outer_line_width = min(3.0, max(2.5, geom.cell_size * 0.20))
 
     c.setStrokeColor(colors.HexColor("#1F2937"))
     c.setLineWidth(maze_line_width)
@@ -336,8 +336,8 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
     start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
     end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
 
-    icon_size = geom.cell_size * 3.0
-    small_gap = 5.0
+    icon_size = PAGE_W * 0.07
+    small_gap = 6.0
 
     def icon_box_for_side(open_x: float, open_y: float, side: str) -> tuple[float, float]:
         if side == "W":
