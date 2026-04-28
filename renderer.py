@@ -40,12 +40,12 @@ def compute_maze_geometry(
     span_rows = (max_row - min_row + 1)
     span_cols = (max_col - min_col + 1)
 
-    target_maze_width = min(region_w * 0.99, page_width * 0.84)
-    target_maze_height = min(region_h * 0.99, page_height * 0.64)
+    target_maze_width = min(region_w * 0.99, page_width * 0.82)
+    target_maze_height = min(region_h * 0.99, page_height * 0.68)
     cell_size = min(target_maze_width / span_cols, target_maze_height / span_rows)
 
     min_cell_by_width = (page_width * 0.75) / span_cols
-    min_cell_by_height = (page_height * 0.55) / span_rows
+    min_cell_by_height = (page_height * 0.60) / span_rows
     cell_size = max(cell_size, min(min_cell_by_width, min_cell_by_height))
 
     maze_width = span_cols * cell_size
