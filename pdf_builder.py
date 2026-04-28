@@ -307,8 +307,8 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     min_x = margin
     max_x = PAGE_W - margin
 
-    # Bigger icon target to match large reference style.
-    base_icon_size = max(geom.cell_size * 4.2, PAGE_W * 0.17, geom.maze_height * icon_scale)
+    # Fixed large icon size (same on every page).
+    fixed_icon_size = PAGE_W * 0.18
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
         factor = 0.5 + (gap / size)
@@ -320,20 +320,25 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
         fits = left >= min_x and right <= max_x and bottom >= min_icon_bottom and top <= max_icon_top
         return left, bottom, fits
 
-    shared_size = base_icon_size
-    s_left = s_bottom = e_left = e_bottom = 0.0
-    found_fit = False
-    for _ in range(28):
-        s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
-        e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
-        if s_fit and e_fit:
-            found_fit = True
-            break
-        shared_size *= 0.92
-        if shared_size <= PAGE_W * 0.06:
-            break
-    if not found_fit:
-        # Strict rule: do not clamp into maze/page interior; reject candidate and regenerate.
+    shared_size = fixed_icon_size
+    s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
+    e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
+    if not (s_fit and e_fit):
+        # Strict rule: same icon size everywhere; reject candidate if it doesn't fit.
+        return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
+
+    # Reject center-ish side placements; require corner-biased positions.
+    quarter_y_low = PAGE_H * 0.30
+    quarter_y_high = PAGE_H * 0.70
+    quarter_x_low = PAGE_W * 0.30
+    quarter_x_high = PAGE_W * 0.70
+    if entry_side in {"W", "E"} and (quarter_y_low <= start_open_y <= quarter_y_high):
+        return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
+    if exit_side in {"W", "E"} and (quarter_y_low <= end_open_y <= quarter_y_high):
+        return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
+    if entry_side in {"N", "S"} and (quarter_x_low <= start_open_x <= quarter_x_high):
+        return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
+    if exit_side in {"N", "S"} and (quarter_x_low <= end_open_x <= quarter_x_high):
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
     # Disallow icon overlap; both icons must exist distinctly.
