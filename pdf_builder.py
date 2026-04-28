@@ -19,7 +19,7 @@ from reportlab.pdfgen import canvas
 
 from icons import IconPair, load_icon_pairs
 from maze_generator import Maze, generate_maze, maze_signature
-from renderer import clamp_point, compute_maze_geometry, opening_point, cell_box
+from renderer import compute_maze_geometry, opening_point, cell_box
 from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
@@ -117,8 +117,8 @@ def _layout() -> Layout:
     header_y = top - (PAGE_H * HEADER_H)
     story_y = header_y - (PAGE_H * STORY_H)
 
-    maze_region_w = PAGE_W * (0.90 - (2 * MAZE_INNER_PAD))
-    maze_region_h = PAGE_H * 0.70
+    maze_region_w = PAGE_W * 0.78
+    maze_region_h = PAGE_H * 0.65
     maze_region_x = (PAGE_W - maze_region_w) / 2
     maze_region_y = (PAGE_H - maze_region_h) / 2
 
@@ -357,24 +357,6 @@ def _draw_maze(
     start_left, start_bottom = icon_box_for_side(start_open_x, start_open_y, entry_side)
     end_left, end_bottom = icon_box_for_side(end_open_x, end_open_y, exit_side)
 
-    # Keep icons inside page frame while preserving opening attachment.
-    start_left, start_bottom = clamp_point(
-        start_left,
-        start_bottom,
-        layout.left,
-        layout.bottom,
-        layout.right - icon_size,
-        layout.top - icon_size,
-    )
-    end_left, end_bottom = clamp_point(
-        end_left,
-        end_bottom,
-        layout.left,
-        layout.bottom,
-        layout.right - icon_size,
-        layout.top - icon_size,
-    )
-
     _draw_icon(c, str(pair.start_path), start_left + (icon_size / 2), start_bottom + (icon_size / 2), icon_size, icon_size)
     _draw_icon(c, str(pair.finish_path), end_left + (icon_size / 2), end_bottom + (icon_size / 2), icon_size, icon_size)
 
@@ -443,7 +425,7 @@ def build_book(
 
         for attempt in range(36):
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
-            candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor="tl", end_anchor="br")
+            candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor="left", end_anchor="right")
             candidate.difficulty = diff_name
             candidate_path = solve_maze(candidate)
             if not candidate_path:
@@ -457,7 +439,7 @@ def build_book(
 
         if maze is None:
             prng = _unique_rng(seed, page_no, pair.key, diff_name, 999)
-            maze = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor="tl", end_anchor="br")
+            maze = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor="left", end_anchor="right")
             maze.difficulty = diff_name
             solution = solve_maze(maze)
             sig = maze_signature(maze)
