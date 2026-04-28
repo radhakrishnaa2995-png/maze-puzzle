@@ -4,8 +4,26 @@
   "layout_mode": "publication_centered",
   "output_file": "Maze_Puzzle_Book.pdf",
   "difficulty_profiles": {
-    "easy": {"target": "readable-wide"},
-    "medium": {"target": "balanced"},
-    "hard": {"target": "dense-readable"}
+    "easy": {
+      "target": "readable-wide",
+      "rows_range": [14, 20],
+      "cols_range": [18, 28],
+      "corridor_scale": 1.2,
+      "turn_density": 0.25
+    },
+    "medium": {
+      "target": "balanced",
+      "rows_range": [20, 30],
+      "cols_range": [24, 36],
+      "corridor_scale": 1.0,
+      "turn_density": 0.5
+    },
+    "hard": {
+      "target": "dense-readable",
+      "rows_range": [26, 36],
+      "cols_range": [32, 44],
+      "corridor_scale": 0.82,
+      "turn_density": 0.75
+    }
   }
 }
