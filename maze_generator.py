@@ -195,6 +195,49 @@ def _add_loops(active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int,
         walls[nxt][OPPOSITE[side]] = False
 
 
+def _path_exists(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> bool:
+    seen: Set[Cell] = {start}
+    stack: list[Cell] = [start]
+    while stack:
+        cur = stack.pop()
+        if cur == end:
+            return True
+        for side, nxt in _neighbors(cur, rows, cols):
+            if nxt not in active or nxt in seen:
+                continue
+            if walls[cur][side]:
+                continue
+            seen.add(nxt)
+            stack.append(nxt)
+    return False
+
+
+def _force_connect(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> None:
+    """Guarantee entry->exit connectivity by carving a direct rescue tunnel when needed."""
+    if _path_exists(start, end, active, walls, rows, cols):
+        return
+
+    cur = start
+    guard = 0
+    while cur != end and guard < (rows * cols * 3):
+        guard += 1
+        r, c = cur
+        er, ec = end
+        options: list[tuple[str, Cell, int]] = []
+        for side, nxt in _neighbors(cur, rows, cols):
+            if nxt not in active:
+                continue
+            dist = abs(nxt[0] - er) + abs(nxt[1] - ec)
+            options.append((side, nxt, dist))
+        if not options:
+            break
+        options.sort(key=lambda x: x[2])
+        side, nxt, _ = options[0]
+        walls[cur][side] = False
+        walls[nxt][OPPOSITE[side]] = False
+        cur = nxt
+
+
 def _carve_kruskal(
     rows: int,
     cols: int,
@@ -288,12 +331,13 @@ def generate_maze(
         "W": (rows // 2, 0),
         "E": (rows // 2, cols - 1),
     }
-    all_sides = ["N", "S", "W", "E"]
-    start_side_pref = rng.choice(all_sides)
+    # Prefer natural visual flow: start on left/top, finish on right/bottom.
+    start_side_pref = rng.choice(["W", "N", "W", "N", "E", "S"])
     opposite = {"N": "S", "S": "N", "W": "E", "E": "W"}
     # Favor opposite-side exits for longer, more satisfying paths.
+    all_sides = ["N", "S", "W", "E"]
     end_candidates = [s for s in all_sides if s != start_side_pref]
-    weighted = [opposite[start_side_pref], opposite[start_side_pref]] + end_candidates
+    weighted = [opposite[start_side_pref], opposite[start_side_pref], "E", "S"] + end_candidates
     end_side_pref = rng.choice(weighted)
 
     start, start_side = _pick_opening(
@@ -321,6 +365,7 @@ def generate_maze(
     else:
         _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
     _add_loops(active, walls, rows, cols, rng, loop_factor)
+    _force_connect(start, end, active, walls, rows, cols)
 
     walls[start][start_side] = False
     walls[end][end_side] = False
