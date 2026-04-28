@@ -1,7 +1,7 @@
 # main.py
 """Entrypoint for premium Scene Maze Puzzle Book PDF generation."""
 
-from _future_ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -31,6 +31,7 @@ def main() -> None:
     seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
     output_file = str(cfg.get("output_file", OUTPUT_FILE))
     out_path = os.path.join(OUTPUT_DIR, output_file)
+
     difficulty_profiles = cfg.get("difficulty_profiles", {})
     icon_scale = float(cfg.get("icon_scale", 0.2))
     anchor_cycle = cfg.get(
@@ -52,5 +53,5 @@ def main() -> None:
     print(f"Generated {out_path}")
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
