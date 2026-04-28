@@ -1,10 +1,10 @@
-"""Premium rectangular scene-maze generation utilities."""
+"""Masked full-page scene-maze generation utilities."""
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 Cell = Tuple[int, int]
 
@@ -15,6 +15,7 @@ class Maze:
     cols: int
     theme: str
     walls: Dict[Cell, Dict[str, bool]]
+    active_cells: Set[Cell]
     start: Cell
     end: Cell
     start_open_side: str
@@ -31,80 +32,125 @@ DIRS = {
 OPPOSITE = {"N": "S", "S": "N", "W": "E", "E": "W"}
 
 
-def _all_cells(rows: int, cols: int) -> List[Cell]:
-    return [(r, c) for r in range(rows) for c in range(cols)]
+def _neighbors(cell: Cell, rows: int, cols: int) -> List[tuple[str, Cell]]:
+    r, c = cell
+    out: list[tuple[str, Cell]] = []
+    for side, (dr, dc) in DIRS.items():
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < rows and 0 <= nc < cols:
+            out.append((side, (nr, nc)))
+    return out
 
 
-def _opening_from_anchor(rows: int, cols: int, anchor: str, is_start: bool) -> tuple[Cell, str]:
-    if anchor == "tl":
-        return ((0, 0), "W" if is_start else "N")
-    if anchor == "tr":
-        return ((0, cols - 1), "N" if is_start else "E")
-    if anchor == "bl":
-        return ((rows - 1, 0), "W" if is_start else "S")
-    if anchor == "br":
-        return ((rows - 1, cols - 1), "E" if is_start else "S")
-    if anchor == "left":
-        return ((rows // 2, 0), "W")
-    if anchor == "right":
-        return ((rows // 2, cols - 1), "E")
-    return ((0, 0), "W") if is_start else ((rows - 1, cols - 1), "E")
+def _allowed_mask(rows: int, cols: int) -> Set[Cell]:
+    """Create an irregular worksheet-style region (top-right + bottom-left flow)."""
+    allowed: Set[Cell] = set()
+
+    for r in range(rows):
+        for c in range(cols):
+            # Normalized page position with top-origin y for easier layout reasoning.
+            x = (c + 0.5) / cols
+            y = (r + 0.5) / rows
+
+            # Reserve icon no-maze zones.
+            in_start_zone = x < 0.26 and y < 0.30   # top-left icon area
+            in_finish_zone = x > 0.76 and y > 0.72  # bottom-right icon area
+
+            # Flowing union: top-right arm + bottom-left arm + connector band.
+            top_right_arm = (x >= 0.24) and (y <= 0.62)
+            bottom_left_arm = (x <= 0.90) and (y >= 0.34)
+            connector = (0.36 <= y <= 0.62) and (0.30 <= x <= 0.78)
+
+            ok = (top_right_arm or bottom_left_arm or connector) and not in_start_zone and not in_finish_zone
+            if ok:
+                allowed.add((r, c))
+
+    return allowed
 
 
-def _carve_dfs(
+def _boundary_sides(cell: Cell, active: Set[Cell], rows: int, cols: int) -> List[str]:
+    r, c = cell
+    sides: list[str] = []
+    for side, (dr, dc) in DIRS.items():
+        nr, nc = r + dr, c + dc
+        if not (0 <= nr < rows and 0 <= nc < cols) or (nr, nc) not in active:
+            sides.append(side)
+    return sides
+
+
+def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[float, float], preferred: tuple[str, str]) -> tuple[Cell, str]:
+    tr, tc = target
+    candidates: list[tuple[float, Cell, List[str]]] = []
+    for cell in active:
+        sides = _boundary_sides(cell, active, rows, cols)
+        if not sides:
+            continue
+        dist = abs(cell[0] - tr) + abs(cell[1] - tc)
+        candidates.append((dist, cell, sides))
+
+    if not candidates:
+        cell = next(iter(active))
+        return cell, "W"
+
+    candidates.sort(key=lambda x: x[0])
+    # nearest boundary cell, prefer requested border side.
+    for _dist, cell, sides in candidates:
+        for pref in preferred:
+            if pref in sides:
+                return cell, pref
+    first = candidates[0]
+    return first[1], first[2][0]
+
+
+def _carve_masked_dfs(
     rows: int,
     cols: int,
+    active: Set[Cell],
     walls: Dict[Cell, Dict[str, bool]],
     start: Cell,
     rng: random.Random,
     straight_preference: float,
 ) -> None:
-    visited = {start}
+    visited: Set[Cell] = {start}
     stack: list[Cell] = [start]
     prev_dir: dict[Cell, str] = {}
 
     while stack:
-        r, c = stack[-1]
+        cur = stack[-1]
         options: list[tuple[str, Cell]] = []
-
-        for side, (dr, dc) in DIRS.items():
-            nr, nc = r + dr, c + dc
-            nxt = (nr, nc)
-            if 0 <= nr < rows and 0 <= nc < cols and nxt not in visited:
+        for side, nxt in _neighbors(cur, rows, cols):
+            if nxt in active and nxt not in visited:
                 options.append((side, nxt))
 
         if not options:
             stack.pop()
             continue
 
-        if stack and rng.random() < straight_preference and stack[-1] in prev_dir:
-            last_side = prev_dir[stack[-1]]
-            straight = [opt for opt in options if opt[0] == last_side]
+        side: str
+        nxt: Cell
+        if rng.random() < straight_preference and cur in prev_dir:
+            straight = [opt for opt in options if opt[0] == prev_dir[cur]]
             side, nxt = rng.choice(straight or options)
         else:
             side, nxt = rng.choice(options)
-        walls[(r, c)][side] = False
+
+        walls[cur][side] = False
         walls[nxt][OPPOSITE[side]] = False
         prev_dir[nxt] = side
         visited.add(nxt)
         stack.append(nxt)
 
 
-def _add_loops(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], rng: random.Random, loop_factor: float) -> None:
+def _add_loops(active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int, rng: random.Random, loop_factor: float) -> None:
     candidates: list[tuple[Cell, str, Cell]] = []
-
-    for r in range(rows):
-        for c in range(cols):
-            cell = (r, c)
-            for side, (dr, dc) in DIRS.items():
-                nr, nc = r + dr, c + dc
-                nxt = (nr, nc)
-                if not (0 <= nr < rows and 0 <= nc < cols):
-                    continue
-                if walls[cell][side]:
-                    rev = (nxt, OPPOSITE[side], cell)
-                    if rev not in candidates:
-                        candidates.append((cell, side, nxt))
+    for cell in active:
+        for side, nxt in _neighbors(cell, rows, cols):
+            if nxt not in active:
+                continue
+            if walls[cell][side]:
+                rev = (nxt, OPPOSITE[side], cell)
+                if rev not in candidates:
+                    candidates.append((cell, side, nxt))
 
     rng.shuffle(candidates)
     open_count = int(len(candidates) * loop_factor)
@@ -115,7 +161,7 @@ def _add_loops(rows: int, cols: int, walls: Dict[Cell, Dict[str, bool]], rng: ra
 
 def maze_signature(maze: Maze) -> str:
     bits = []
-    for cell in _all_cells(maze.rows, maze.cols):
+    for cell in sorted(maze.active_cells):
         w = maze.walls[cell]
         bits.append(f"{cell[0]}:{cell[1]}:{int(w['N'])}{int(w['E'])}{int(w['S'])}{int(w['W'])}")
     return f"{maze.theme}|{maze.start}|{maze.end}|" + "|".join(bits)
@@ -127,35 +173,37 @@ def generate_maze(
     theme: str,
     difficulty_factor: float,
     rng: random.Random,
-    start_anchor: str = "left",
-    end_anchor: str = "right",
+    start_anchor: str = "tl",
+    end_anchor: str = "br",
 ) -> Maze:
-    rows = max(10, rows)
-    cols = max(10, cols)
+    rows = max(18, rows)
+    cols = max(24, cols)
 
-    cells = _all_cells(rows, cols)
-    walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in cells}
+    active = _allowed_mask(rows, cols)
+    if len(active) < 10:
+        raise ValueError("Masked maze region is too small")
 
-    start, start_side = _opening_from_anchor(rows, cols, start_anchor, is_start=True)
-    end, end_side = _opening_from_anchor(rows, cols, end_anchor, is_start=False)
+    walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
-    if start == end:
-        end = (rows - 1, cols - 1)
-        end_side = "E"
+    # Opening targets follow worksheet composition.
+    start_target = (int(rows * 0.16), int(cols * 0.30))
+    end_target = (int(rows * 0.82), int(cols * 0.88))
+    start, start_side = _pick_opening(active, rows, cols, start_target, ("W", "N"))
+    end, end_side = _pick_opening(active, rows, cols, end_target, ("E", "S"))
 
-    # Difficulty profile (visibly different styles).
+    # Difficulty profile.
     if difficulty_factor <= 0.30:  # Easy
-        straight_pref = 0.74
-        loop_factor = 0.24
+        straight_pref = 0.72
+        loop_factor = 0.20
     elif difficulty_factor <= 0.75:  # Medium
-        straight_pref = 0.48
-        loop_factor = 0.12
+        straight_pref = 0.42
+        loop_factor = 0.11
     else:  # Hard
-        straight_pref = 0.18
-        loop_factor = 0.05
+        straight_pref = 0.16
+        loop_factor = 0.04
 
-    _carve_dfs(rows, cols, walls, start, rng, straight_preference=straight_pref)
-    _add_loops(rows, cols, walls, rng, loop_factor)
+    _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
+    _add_loops(active, walls, rows, cols, rng, loop_factor)
 
     walls[start][start_side] = False
     walls[end][end_side] = False
@@ -165,6 +213,7 @@ def generate_maze(
         cols=cols,
         theme=theme,
         walls=walls,
+        active_cells=active,
         start=start,
         end=end,
         start_open_side=start_side,
