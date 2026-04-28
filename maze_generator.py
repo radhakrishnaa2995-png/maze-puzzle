@@ -58,17 +58,13 @@ def _allowed_mask(rows: int, cols: int) -> Set[Cell]:
             x = (c + 0.5) / cols
             y = (r + 0.5) / rows
 
-            # Blocked icon zones.
             in_start_zone = x < 0.24 and y < 0.30
             in_finish_zone = x > 0.76 and y > 0.72
 
-            # Main centered footprint (balanced 8-10% padding feel).
-            in_main = 0.12 <= x <= 0.88 and 0.12 <= y <= 0.88
-
-            # Flow shaping: reinforce top-right and bottom-left travel arms.
+            in_main = 0.10 <= x <= 0.90 and 0.12 <= y <= 0.88
             top_right_arm = x >= 0.30 and y <= 0.62
             bottom_left_arm = x <= 0.70 and y >= 0.36
-            connector = 0.36 <= y <= 0.62 and 0.30 <= x <= 0.70
+            connector = 0.34 <= y <= 0.64 and 0.28 <= x <= 0.72
 
             ok = in_main and (top_right_arm or bottom_left_arm or connector) and not in_start_zone and not in_finish_zone
             if ok:
@@ -181,29 +177,28 @@ def generate_maze(
     start_anchor: str = "tl",
     end_anchor: str = "br",
 ) -> Maze:
-    # Difficulty tuning for readability.
+    # Difficulty tuning focused on readability.
     if difficulty_factor <= 0.30:
-        rows = max(20, min(rows, 24))
-        cols = max(24, min(cols, 30))
-        straight_pref = 0.78
-        loop_factor = 0.22
+        rows = max(16, min(rows, 20))
+        cols = max(20, min(cols, 26))
+        straight_pref = 0.82
+        loop_factor = 0.24
     elif difficulty_factor <= 0.75:
-        rows = max(28, min(rows, 34))
-        cols = max(34, min(cols, 40))
-        straight_pref = 0.50
-        loop_factor = 0.12
+        rows = max(22, min(rows, 28))
+        cols = max(28, min(cols, 34))
+        straight_pref = 0.54
+        loop_factor = 0.14
     else:
-        rows = max(34, min(rows, 40))
-        cols = max(42, min(cols, 50))
-        straight_pref = 0.20
-        loop_factor = 0.05
+        rows = max(28, min(rows, 34))
+        cols = max(34, min(cols, 42))
+        straight_pref = 0.24
+        loop_factor = 0.07
 
     active = _allowed_mask(rows, cols)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
-    # Entrance near upper-left of mask, exit near lower-right of mask.
-    start, start_side = _pick_opening(active, rows, cols, (int(rows * 0.16), int(cols * 0.24)), ("W", "N"))
-    end, end_side = _pick_opening(active, rows, cols, (int(rows * 0.82), int(cols * 0.84)), ("E", "S"))
+    start, start_side = _pick_opening(active, rows, cols, (int(rows * 0.14), int(cols * 0.24)), ("W", "N"))
+    end, end_side = _pick_opening(active, rows, cols, (int(rows * 0.84), int(cols * 0.86)), ("E", "S"))
 
     _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
     _add_loops(active, walls, rows, cols, rng, loop_factor)
