@@ -1,5 +1,6 @@
 {
   "pages_per_book": 15,
   "icon_dir": "assets/icons",
-  "layout_mode": "flow_masked"
+  "layout_mode": "publication_centered",
+  "output_file": "Maze_Puzzle_Book.pdf"
 }
