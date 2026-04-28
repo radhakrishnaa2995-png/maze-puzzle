@@ -1,6 +1,6 @@
 """Masked full-page scene-maze generation utilities with algorithm variation."""
 
-from _future_ import annotations
+from __future__ import annotations
 
 import random
 from dataclasses import dataclass
