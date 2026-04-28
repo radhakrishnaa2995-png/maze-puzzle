@@ -394,8 +394,7 @@ def _draw_maze(
         if w["E"]:
             c.line(x1, y0, x1, y1)
 
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(outer_line_width)
+    outer_segments: list[tuple[float, float, float, float]] = []
     for rc in maze.active_cells:
         r, cc = rc
         x0, y0, x1, y1 = cell_box(rc, geom)
@@ -412,7 +411,7 @@ def _draw_maze(
                 continue
             if rc == maze.end and side == maze.end_open_side:
                 continue
-            c.line(*seg)
+            outer_segments.append(seg)
 
     icon_place = _resolve_icon_placement(maze, layout, geom, icon_scale)
     start_left, start_bottom = icon_place.start_left, icon_place.start_bottom
@@ -425,22 +424,14 @@ def _draw_maze(
     if not icon_place.valid:
         raise ValueError("Icon placement invalid (overlap or side conflict).")
 
-    _draw_icon(
-        c,
-        str(pair.start_path),
-        start_left + (shared_size / 2),
-        start_bottom + (shared_size / 2),
-        shared_size,
-        shared_size,
-    )
-    _draw_icon(
-        c,
-        str(pair.finish_path),
-        end_left + (shared_size / 2),
-        end_bottom + (shared_size / 2),
-        shared_size,
-        shared_size,
-    )
+    _draw_icon(c, str(pair.start_path), start_left + (shared_size / 2), start_bottom + (shared_size / 2), shared_size, shared_size)
+    _draw_icon(c, str(pair.finish_path), end_left + (shared_size / 2), end_bottom + (shared_size / 2), shared_size, shared_size)
+
+    # Draw maze outline after icons so icon sides appear tucked under the border.
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(outer_line_width)
+    for seg in outer_segments:
+        c.line(*seg)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
