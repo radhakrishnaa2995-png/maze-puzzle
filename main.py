@@ -1,59 +1,56 @@
-from maze_generator import MazeGenerator
-from pdf_builder import MazePDFBuilder
+# main.py
+"""Entrypoint for premium Scene Maze Puzzle Book PDF generation."""
 
-def main():
-    pdf = MazePDFBuilder()
-    gen = MazeGenerator()
-    
-    # Story Themes
-    themes = [
-        {"name": "Pirate Quest", "story": "Help the pirate ship reach the treasure chest!", "start_img": "assets/ship.png", "end_img": "assets/treasure.png"},
-        {"name": "Space Race", "story": "Guide the rocket to the mystery planet!", "start_img": "assets/rocket.png", "end_img": "assets/planet.png"},
-        {"name": "City Drive", "story": "Help the car reach the garage safely!", "start_img": "assets/car.png", "end_img": "assets/garage.png"}
-    ]
+from _future_ import annotations
 
-    # FIX 10: Entry/Exit Variation Patterns
-    # (entry_coord, exit_coord)
-    patterns = [
-        ((0, 5), (20, 15)),   # Left to Right
-        ((5, 0), (15, 20)),   # Top to Bottom
-        ((0, 0), (20, 20)),   # Corner to Corner
-        ((10, 0), (0, 15))    # Top to Left
-    ]
+import json
+import os
+import secrets
+import time
 
-    for i in range(1, 31): # 30 Pages
-        theme = themes[(i-1) % len(themes)]
-        pattern = patterns[(i-1) % len(patterns)]
-        
-        # FIX 3: Difficulty System (Easy, Medium, Hard)
-        if i <= 10:
-            diff, stars, size = "Easy", 1, 15
-        elif i <= 20:
-            diff, stars, size = "Medium", 2, 21
-        else:
-            diff, stars, size = "Hard", 3, 31
+from icons import load_icon_pairs
+from pdf_builder import build_book
 
-        entry, exit_pt = pattern
-        # Adjust pattern to fit grid size
-        entry = (min(entry[0], size-1), min(entry[1], size-1))
-        exit_pt = (min(exit_pt[0], size-1), min(exit_pt[1], size-1))
+OUTPUT_DIR = "output"
+CONFIG_FILE = "config.json"
+OUTPUT_FILE = "Maze_Puzzle_Book.pdf"
 
-        grid = gen.generate(size, size, entry, exit_pt)
-        
-        page_data = {
-            "num": i,
-            "grid": grid,
-            "theme": theme,
-            "difficulty": diff,
-            "star_count": stars,
-            "entry": entry,
-            "exit": exit_pt
-        }
-        
-        pdf.add_maze_page(page_data)
 
-    pdf.output("KDP_Premium_Maze_Book.pdf")
-    print("Success: KDP_Premium_Maze_Book.pdf generated.")
+def main() -> None:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-if __name__ == "__main__":
+    with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+
+    icon_dir = str(cfg.get("icon_dir", "assets/icons"))
+    pages_per_book = int(cfg.get("pages_per_book", 15))
+
+    pairs = load_icon_pairs(icon_dir)
+    pages = max(len(pairs), max(1, pages_per_book))
+
+    seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
+    output_file = str(cfg.get("output_file", OUTPUT_FILE))
+    out_path = os.path.join(OUTPUT_DIR, output_file)
+    difficulty_profiles = cfg.get("difficulty_profiles", {})
+    icon_scale = float(cfg.get("icon_scale", 0.2))
+    anchor_cycle = cfg.get(
+        "entry_exit_cycle",
+        [["tl", "br"], ["tr", "bl"], ["left", "right"], ["top", "bottom"]],
+    )
+
+    build_book(
+        output_file=out_path,
+        pages=pages,
+        seed=seed,
+        title="Scene Maze Puzzle Book",
+        icon_dir=icon_dir,
+        difficulty_profiles=difficulty_profiles,
+        icon_scale=icon_scale,
+        anchor_cycle=anchor_cycle,
+    )
+
+    print(f"Generated {out_path}")
+
+
+if _name_ == "_main_":
     main()
