@@ -110,6 +110,20 @@ def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[int, in
     return any_cell, "W"
 
 
+def _pick_opening_on_side(active: Set[Cell], rows: int, cols: int, side: str, target_row: int) -> tuple[Cell, str]:
+    candidates: list[tuple[int, Cell]] = []
+    for cell in active:
+        sides = _boundary_sides(cell, active, rows, cols)
+        if side in sides:
+            candidates.append((abs(cell[0] - target_row), cell))
+    if candidates:
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1], side
+    # Fallback should be rare; preserve validity with closest boundary opening.
+    pref = (side, "W", "E", "N", "S")
+    return _pick_opening(active, rows, cols, (target_row, cols // 2), pref)
+
+
 def _carve_masked_dfs(
     rows: int,
     cols: int,
@@ -337,20 +351,8 @@ def generate_maze(
     if end_side_pref == start_side_pref:
         end_side_pref = "E" if start_side_pref != "E" else "W"
 
-    start, start_side = _pick_opening(
-        active,
-        rows,
-        cols,
-        side_to_target[start_side_pref],
-        (start_side_pref, "W", "N", "E", "S"),
-    )
-    end, end_side = _pick_opening(
-        active,
-        rows,
-        cols,
-        side_to_target[end_side_pref],
-        (end_side_pref, "E", "S", "W", "N"),
-    )
+    start, start_side = _pick_opening_on_side(active, rows, cols, start_side_pref, target_row=rows // 2)
+    end, end_side = _pick_opening_on_side(active, rows, cols, end_side_pref, target_row=rows // 2)
 
     algorithm = rng.choice(["dfs", "prim", "kruskal", "biased"])
     if algorithm == "prim":
