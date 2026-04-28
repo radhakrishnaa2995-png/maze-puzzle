@@ -331,14 +331,11 @@ def generate_maze(
         "W": (rows // 2, 0),
         "E": (rows // 2, cols - 1),
     }
-    # Prefer natural visual flow: start on left/top, finish on right/bottom.
-    start_side_pref = rng.choice(["W", "N", "W", "N", "E", "S"])
-    opposite = {"N": "S", "S": "N", "W": "E", "E": "W"}
-    # Favor opposite-side exits for longer, more satisfying paths.
-    all_sides = ["N", "S", "W", "E"]
-    end_candidates = [s for s in all_sides if s != start_side_pref]
-    weighted = [opposite[start_side_pref], opposite[start_side_pref], "E", "S"] + end_candidates
-    end_side_pref = rng.choice(weighted)
+    # Architecture rule: choose entry/exit from intended image flow first.
+    start_side_pref = "W" if start_anchor.lower() in {"left", "l", "tl", "bl"} else "N"
+    end_side_pref = "E" if end_anchor.lower() in {"right", "r", "tr", "br"} else "S"
+    if end_side_pref == start_side_pref:
+        end_side_pref = "E" if start_side_pref != "E" else "W"
 
     start, start_side = _pick_opening(
         active,
