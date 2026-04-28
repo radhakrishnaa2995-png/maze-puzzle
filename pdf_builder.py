@@ -19,7 +19,7 @@ from reportlab.pdfgen import canvas
 
 from icons import IconPair, load_icon_pairs
 from maze_generator import Maze, generate_maze, maze_signature
-from renderer import clamp_point, compute_maze_geometry, icon_center_from_opening, opening_point, cell_box
+from renderer import clamp_point, compute_maze_geometry, opening_point, cell_box
 from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
@@ -311,18 +311,47 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
                 continue
             c.line(*seg)
 
-    start_open_x, start_open_y = opening_point(maze.start, maze.start_open_side, geom)
-    end_open_x, end_open_y = opening_point(maze.end, maze.end_open_side, geom)
+    entry_row, entry_col, entry_side = maze.entry_opening
+    exit_row, exit_col, exit_side = maze.exit_opening
+
+    start_open_x, start_open_y = opening_point((entry_row, entry_col), entry_side, geom)
+    end_open_x, end_open_y = opening_point((exit_row, exit_col), exit_side, geom)
 
     icon_size = geom.cell_size * 2.2
-    sx, sy = icon_center_from_opening(start_open_x, start_open_y, maze.start_open_side, icon_size, 0.60)
-    ex, ey = icon_center_from_opening(end_open_x, end_open_y, maze.end_open_side, icon_size, 0.40)
+    small_gap = 7.0
 
-    sx, sy = clamp_point(sx, sy, layout.left + icon_size * 0.5, layout.bottom + icon_size * 0.5, layout.right - icon_size * 0.5, layout.top - icon_size * 0.5)
-    ex, ey = clamp_point(ex, ey, layout.left + icon_size * 0.5, layout.bottom + icon_size * 0.5, layout.right - icon_size * 0.5, layout.top - icon_size * 0.5)
+    def icon_box_for_side(open_x: float, open_y: float, side: str) -> tuple[float, float]:
+        if side == "W":
+            return open_x - icon_size - small_gap, open_y - (icon_size / 2)
+        if side == "N":
+            return open_x - (icon_size / 2), open_y + small_gap
+        if side == "E":
+            return open_x + small_gap, open_y - (icon_size / 2)
+        return open_x - (icon_size / 2), open_y - icon_size - small_gap
 
-    _draw_icon(c, str(pair.start_path), sx, sy, icon_size, icon_size)
-    _draw_icon(c, str(pair.finish_path), ex, ey, icon_size, icon_size)
+    start_left, start_bottom = icon_box_for_side(start_open_x, start_open_y, entry_side)
+    end_left, end_bottom = icon_box_for_side(end_open_x, end_open_y, exit_side)
+
+    # Keep icons inside page frame while preserving opening attachment.
+    start_left, start_bottom = clamp_point(
+        start_left,
+        start_bottom,
+        layout.left,
+        layout.bottom,
+        layout.right - icon_size,
+        layout.top - icon_size,
+    )
+    end_left, end_bottom = clamp_point(
+        end_left,
+        end_bottom,
+        layout.left,
+        layout.bottom,
+        layout.right - icon_size,
+        layout.top - icon_size,
+    )
+
+    _draw_icon(c, str(pair.start_path), start_left + (icon_size / 2), start_bottom + (icon_size / 2), icon_size, icon_size)
+    _draw_icon(c, str(pair.finish_path), end_left + (icon_size / 2), end_bottom + (icon_size / 2), icon_size, icon_size)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
