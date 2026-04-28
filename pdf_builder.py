@@ -4,12 +4,12 @@ import random
 def _draw_maze(c, maze, pair, page_w, page_h, difficulty):
 
     # =========================
-    # SAFE PAGE LAYOUT
+    # PAGE LAYOUT (FIXED)
     # =========================
     margin = 40
+    TOP_RESERVED = 100   # SPACE FOR TITLE (VERY IMPORTANT)
 
-    title_h = 90
-    maze_top = page_h - title_h
+    maze_top = page_h - TOP_RESERVED
     maze_bottom = margin
 
     maze_height = maze_top - maze_bottom
@@ -18,6 +18,9 @@ def _draw_maze(c, maze, pair, page_w, page_h, difficulty):
     rows = maze.rows
     cols = maze.cols
 
+    # =========================
+    # CELL SIZE (FIT BOTH AXES)
+    # =========================
     cell_size = min(
         maze_width / cols,
         maze_height / rows
@@ -26,46 +29,20 @@ def _draw_maze(c, maze, pair, page_w, page_h, difficulty):
     maze_w = cell_size * cols
     maze_h = cell_size * rows
 
+    # =========================
+    # PERFECT CENTERING
+    # =========================
     maze_x = (page_w - maze_w) / 2
     maze_y = maze_bottom + (maze_height - maze_h) / 2
 
     # =========================
-    # RANDOM ENTRY/EXIT STYLE
+    # ENTRY / EXIT (FROM MAZE)
     # =========================
-    patterns = [
-        ("TL", "BR"),
-        ("TR", "BL"),
-        ("LEFT", "RIGHT"),
-        ("TOP", "BOTTOM")
-    ]
+    start_cell = maze.start
+    end_cell = maze.end
 
-    entry_type, exit_type = random.choice(patterns)
-
-    # =========================
-    # GET ENTRY / EXIT CELLS
-    # =========================
-    def get_edge_cell(edge):
-        if edge == "TL":
-            return (0, 0)
-        if edge == "TR":
-            return (0, cols - 1)
-        if edge == "BL":
-            return (rows - 1, 0)
-        if edge == "BR":
-            return (rows - 1, cols - 1)
-        if edge == "LEFT":
-            return (rows // 2, 0)
-        if edge == "RIGHT":
-            return (rows // 2, cols - 1)
-        if edge == "TOP":
-            return (0, cols // 2)
-        if edge == "BOTTOM":
-            return (rows - 1, cols // 2)
-
-    start_cell = get_edge_cell(entry_type)
-    end_cell = get_edge_cell(exit_type)
-
-    maze.set_entry_exit(start_cell, end_cell)
+    entry_side = maze.start_open_side
+    exit_side = maze.end_open_side
 
     # =========================
     # DRAW MAZE
@@ -74,6 +51,7 @@ def _draw_maze(c, maze, pair, page_w, page_h, difficulty):
 
     for r in range(rows):
         for col in range(cols):
+
             x = maze_x + col * cell_size
             y = maze_y + (rows - r - 1) * cell_size
 
@@ -89,28 +67,43 @@ def _draw_maze(c, maze, pair, page_w, page_h, difficulty):
                 c.line(x + cell_size, y, x + cell_size, y + cell_size)
 
     # =========================
-    # IMAGE SIZE (BIG FIX)
+    # IMAGE SIZE (BIG + CLEAN)
     # =========================
-    img_size = cell_size * 2.5
+    img_size = cell_size * 3   # BIGGER THAN BEFORE
 
+    # =========================
+    # PERFECT IMAGE ALIGNMENT
+    # =========================
     def draw_icon(image_path, cell, side):
         r, col = cell
 
+        # CENTER OF CELL
         cx = maze_x + col * cell_size + cell_size / 2
         cy = maze_y + (rows - r - 1) * cell_size + cell_size / 2
 
-        if side in ["LEFT", "TL", "BL"]:
-            x = cx - img_size * 1.2
+        GAP = 4  # small gap from wall
+
+        # POSITION BASED ON OPEN SIDE
+        if side == "W":  # LEFT
+            x = cx - img_size - GAP
             y = cy - img_size / 2
-        elif side in ["RIGHT", "TR", "BR"]:
-            x = cx + img_size * 0.2
+
+        elif side == "E":  # RIGHT
+            x = cx + GAP
             y = cy - img_size / 2
-        elif side == "TOP":
+
+        elif side == "N":  # TOP
             x = cx - img_size / 2
-            y = cy + img_size * 0.2
-        else:  # BOTTOM
+            y = cy + GAP
+
+        elif side == "S":  # BOTTOM
             x = cx - img_size / 2
-            y = cy - img_size * 1.2
+            y = cy - img_size - GAP
+
+        else:
+            # fallback (should never happen)
+            x = cx - img_size / 2
+            y = cy - img_size / 2
 
         c.drawImage(
             ImageReader(image_path),
@@ -121,5 +114,8 @@ def _draw_maze(c, maze, pair, page_w, page_h, difficulty):
             mask='auto'
         )
 
-    draw_icon(pair.start_path, start_cell, entry_type)
-    draw_icon(pair.end_path, end_cell, exit_type)
+    # =========================
+    # DRAW START & END IMAGES
+    # =========================
+    draw_icon(pair.start_path, start_cell, entry_side)
+    draw_icon(pair.end_path, end_cell, exit_side)
