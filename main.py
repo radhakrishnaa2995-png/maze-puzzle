@@ -23,10 +23,10 @@ def main() -> None:
         cfg = json.load(fh)
 
     icon_dir = str(cfg.get("icon_dir", "assets/icons"))
-    pages_per_book = int(cfg.get("pages_per_book", 15))
 
     pairs = load_icon_pairs(icon_dir)
-    pages = max(len(pairs), max(1, pages_per_book))
+    # Strict requirement: pages == total_pairs (no forced duplication)
+    pages = len(pairs)
 
     seed = (time.time_ns() ^ secrets.randbits(64)) & ((1 << 63) - 1)
     output_file = str(cfg.get("output_file", OUTPUT_FILE))
