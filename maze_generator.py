@@ -4,10 +4,13 @@ class MazeGenerator:
     def __init__(self, cols, rows):
         self.cols = cols
         self.rows = rows
+        # Grid: 1 is wall, 0 is path
         self.grid = [[1 for _ in range(cols)] for _ in range(rows)]
 
     def generate(self, entry_pos, exit_pos):
+        # Reset grid
         self.grid = [[1 for _ in range(self.cols)] for _ in range(self.rows)]
+        
         stack = [entry_pos]
         self.grid[entry_pos[1]][entry_pos[0]] = 0
         visited = {entry_pos}
@@ -23,6 +26,7 @@ class MazeGenerator:
 
             if neighbors:
                 nx, ny = random.choice(neighbors)
+                # Remove wall between cells
                 self.grid[curr_y + (ny - curr_y)//2][curr_x + (nx - curr_x)//2] = 0
                 self.grid[ny][nx] = 0
                 visited.add((nx, ny))
@@ -30,7 +34,7 @@ class MazeGenerator:
             else:
                 stack.pop()
         
-        # Ensure path to entry/exit edges
+        # Ensure the entry and exit cells are definitely paths
         self.grid[entry_pos[1]][entry_pos[0]] = 0
         self.grid[exit_pos[1]][exit_pos[0]] = 0
         return self.grid
