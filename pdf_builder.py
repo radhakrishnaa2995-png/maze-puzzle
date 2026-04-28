@@ -25,22 +25,23 @@ PAGE_W, PAGE_H = A4
 # Strict layout percentages on full page.
 MARGIN_PCT = 0.05
 HEADER_PCT = 0.10
-LEFT_ZONE_PCT = 0.25
-MAZE_X_PCT = 0.30
-MAZE_Y_PCT = 0.16
-MAZE_W_PCT = 0.62
-MAZE_H_PCT = 0.72
+
+# Flowing maze placement: broad page coverage, not a boxed center block.
+MAZE_X_PCT = 0.10
+MAZE_Y_PCT = 0.08
+MAZE_W_PCT = 0.84
+MAZE_H_PCT = 0.82
 
 # Fixed icon targets (deterministic, page-based).
 START_X_PCT = 0.16
 START_Y_PCT = 0.74
-START_W_PCT = 0.20
+START_W_PCT = 0.22
 START_H_PCT = 0.24
 
 FINISH_X_PCT = 0.84
-FINISH_Y_PCT = 0.12
-FINISH_W_PCT = 0.16
-FINISH_H_PCT = 0.20
+FINISH_Y_PCT = 0.14
+FINISH_W_PCT = 0.17
+FINISH_H_PCT = 0.19
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -95,10 +96,10 @@ class LayoutZones:
 def _difficulty_for_page(page_idx: int, total_pages: int) -> tuple[str, int, int, float]:
     progress = (page_idx + 1) / max(1, total_pages)
     if progress <= 0.30:
-        return "Easy", 11, 14, 0.18
+        return "Easy", 24, 30, 0.18
     if progress <= 0.70:
-        return "Medium", 17, 22, 0.56
-    return "Hard", 25, 32, 0.92
+        return "Medium", 30, 38, 0.56
+    return "Hard", 36, 46, 0.92
 
 
 def _palette_cycle(total: int, rng: random.Random) -> list[colors.Color]:
@@ -248,45 +249,52 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, zones: LayoutZones, show_solution: 
         y0 = maze_y + ((rows - 1 - r) * cell)
         return x0, y0, x0 + cell, y0 + cell
 
+    # Draw only active masked cells -> flowing non-rectangular maze.
     c.setStrokeColor(colors.HexColor("#1F2937"))
-    c.setLineWidth(max(0.9, cell * 0.10))
-    for r in range(rows):
-        for cc in range(cols):
-            x0, y0, x1, y1 = box((r, cc))
-            w = maze.walls[(r, cc)]
-            if w["N"]:
-                c.line(x0, y1, x1, y1)
-            if w["S"]:
-                c.line(x0, y0, x1, y0)
-            if w["W"]:
-                c.line(x0, y0, x0, y1)
-            if w["E"]:
-                c.line(x1, y0, x1, y1)
+    c.setLineWidth(max(0.72, cell * 0.08))
+    for rc in maze.active_cells:
+        x0, y0, x1, y1 = box(rc)
+        w = maze.walls[rc]
+        if w["N"]:
+            c.line(x0, y1, x1, y1)
+        if w["S"]:
+            c.line(x0, y0, x1, y0)
+        if w["W"]:
+            c.line(x0, y0, x0, y1)
+        if w["E"]:
+            c.line(x1, y0, x1, y1)
 
+    # Emphasize outer silhouette walls.
     c.setStrokeColor(colors.black)
-    c.setLineWidth(max(2.3, cell * 0.24))
-    for r in range(rows):
-        for cc in range(cols):
-            x0, y0, x1, y1 = box((r, cc))
-            w = maze.walls[(r, cc)]
-            if r == 0 and w["N"]:
-                c.line(x0, y1, x1, y1)
-            if r == rows - 1 and w["S"]:
-                c.line(x0, y0, x1, y0)
-            if cc == 0 and w["W"]:
-                c.line(x0, y0, x0, y1)
-            if cc == cols - 1 and w["E"]:
-                c.line(x1, y0, x1, y1)
+    c.setLineWidth(max(1.8, cell * 0.16))
+    for rc in maze.active_cells:
+        r, cc = rc
+        x0, y0, x1, y1 = box(rc)
+        for side, (dr, dc), seg in [
+            ("N", (-1, 0), (x0, y1, x1, y1)),
+            ("S", (1, 0), (x0, y0, x1, y0)),
+            ("W", (0, -1), (x0, y0, x0, y1)),
+            ("E", (0, 1), (x1, y0, x1, y1)),
+        ]:
+            nbr = (r + dr, cc + dc)
+            if nbr in maze.active_cells:
+                continue
+            if rc == maze.start and side == maze.start_open_side:
+                continue
+            if rc == maze.end and side == maze.end_open_side:
+                continue
+            c.line(*seg)
 
-    # Deterministic worksheet template icon placement.
     _draw_icon(c, str(pair.start_path), zones.start_cx, zones.start_cy, zones.start_w, zones.start_h)
     _draw_icon(c, str(pair.finish_path), zones.finish_cx, zones.finish_cy, zones.finish_w, zones.finish_h)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
-        c.setLineWidth(max(2.0, cell * 0.26))
+        c.setLineWidth(max(1.8, cell * 0.18))
         points = []
         for r, cc in path:
+            if (r, cc) not in maze.active_cells:
+                continue
             x0, y0, _, _ = box((r, cc))
             points.append((x0 + (cell / 2), y0 + (cell / 2)))
         for i in range(len(points) - 1):
