@@ -124,6 +124,17 @@ def _pick_opening_on_side(active: Set[Cell], rows: int, cols: int, side: str, ta
     return _pick_opening(active, rows, cols, (target_row, cols // 2), pref)
 
 
+def _pick_corner_opening(active: Set[Cell], rows: int, cols: int, corner: str) -> tuple[Cell, str]:
+    corner_targets: dict[str, tuple[tuple[int, int], tuple[str, str]]] = {
+        "tl": ((0, 0), ("N", "W")),
+        "tr": ((0, cols - 1), ("N", "E")),
+        "bl": ((rows - 1, 0), ("S", "W")),
+        "br": ((rows - 1, cols - 1), ("S", "E")),
+    }
+    target, preferred = corner_targets[corner]
+    return _pick_opening(active, rows, cols, target, preferred)
+
+
 def _carve_masked_dfs(
     rows: int,
     cols: int,
@@ -318,41 +329,59 @@ def generate_maze(
         profile = "easy"
         rows = max(14, min(rows + rng.randint(-1, 2), 18))
         cols = max(14, min(cols + rng.randint(-2, 2), 20))
-        straight_pref = 0.88
-        loop_factor = 0.16
+        straight_pref = 0.62
+        loop_factor = 0.14
         branch_bias = 0.68
     elif difficulty_factor <= 0.75:
         profile = "medium"
         rows = max(18, min(rows + rng.randint(-2, 2), 24))
         cols = max(20, min(cols + rng.randint(-3, 3), 30))
-        straight_pref = 0.58
-        loop_factor = 0.11
+        straight_pref = 0.46
+        loop_factor = 0.12
         branch_bias = 0.50
     else:
         profile = "hard"
         rows = max(24, min(rows + rng.randint(-2, 2), 32))
         cols = max(28, min(cols + rng.randint(-3, 3), 40))
-        straight_pref = 0.28
-        loop_factor = 0.06
+        straight_pref = 0.24
+        loop_factor = 0.10
         branch_bias = 0.35
 
     active = _allowed_mask(rows, cols, rng, profile)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
-    side_to_target: dict[str, tuple[int, int]] = {
-        "N": (0, cols // 2),
-        "S": (rows - 1, cols // 2),
-        "W": (rows // 2, 0),
-        "E": (rows // 2, cols - 1),
-    }
     # Architecture rule: choose entry/exit from intended image flow first.
-    start_side_pref = "W" if start_anchor.lower() in {"left", "l", "tl", "bl"} else "N"
-    end_side_pref = "E" if end_anchor.lower() in {"right", "r", "tr", "br"} else "S"
-    if end_side_pref == start_side_pref:
-        end_side_pref = "E" if start_side_pref != "E" else "W"
+    anchor_side = {
+        "left": "W",
+        "right": "E",
+        "top": "N",
+        "bottom": "S",
+        "tl": "N",
+        "tr": "N",
+        "bl": "S",
+        "br": "S",
+        "l": "W",
+        "r": "E",
+        "t": "N",
+        "b": "S",
+    }
+    start_key = start_anchor.lower()
+    end_key = end_anchor.lower()
+    if start_key in {"tl", "tr", "bl", "br"}:
+        start, start_side = _pick_corner_opening(active, rows, cols, start_key)
+    else:
+        start_side_pref = anchor_side.get(start_key, "W")
+        start, start_side = _pick_opening_on_side(active, rows, cols, start_side_pref, target_row=rows // 2)
 
-    start, start_side = _pick_opening_on_side(active, rows, cols, start_side_pref, target_row=rows // 2)
-    end, end_side = _pick_opening_on_side(active, rows, cols, end_side_pref, target_row=rows // 2)
+    if end_key in {"tl", "tr", "bl", "br"}:
+        end, end_side = _pick_corner_opening(active, rows, cols, end_key)
+    else:
+        end_side_pref = anchor_side.get(end_key, "E")
+        end, end_side = _pick_opening_on_side(active, rows, cols, end_side_pref, target_row=rows // 2)
+
+    if end_side == start_side:
+        alternative = "E" if start_side != "E" else "W"
+        end, end_side = _pick_opening_on_side(active, rows, cols, alternative, target_row=rows // 2)
 
     algorithm = rng.choice(["dfs", "prim", "kruskal", "biased"])
     if algorithm == "prim":
