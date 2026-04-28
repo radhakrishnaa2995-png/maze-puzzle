@@ -6,22 +6,22 @@
   "difficulty_profiles": {
     "easy": {
       "target": "readable-wide",
-      "rows_range": [10, 12],
-      "cols_range": [15, 18],
+      "rows_range": [10, 11],
+      "cols_range": [15, 17],
       "corridor_scale": 1.2,
       "turn_density": 0.25
     },
     "medium": {
       "target": "balanced",
-      "rows_range": [14, 17],
-      "cols_range": [24, 28],
+      "rows_range": [14, 16],
+      "cols_range": [24, 26],
       "corridor_scale": 1.0,
       "turn_density": 0.5
     },
     "hard": {
       "target": "dense-readable",
-      "rows_range": [18, 22],
-      "cols_range": [34, 40],
+      "rows_range": [19, 21],
+      "cols_range": [34, 36],
       "corridor_scale": 0.82,
       "turn_density": 0.75
     }
