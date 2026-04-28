@@ -19,17 +19,15 @@ from reportlab.pdfgen import canvas
 
 from icons import IconPair, load_icon_pairs
 from maze_generator import Maze, generate_maze, maze_signature
+from renderer import clamp_point, compute_maze_geometry, icon_center_from_opening, opening_point, cell_box
 from solver import solve_maze
 
 PAGE_W, PAGE_H = A4
 
-# Balanced page grid and stronger area usage.
 PAD_X = 0.09
 PAD_Y = 0.08
 HEADER_H = 0.09
 STORY_H = 0.055
-MAZE_W = 0.78
-MAZE_H = 0.74
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -74,10 +72,10 @@ class Layout:
     top: float
     header_y: float
     story_y: float
-    maze_x: float
-    maze_y: float
-    maze_w: float
-    maze_h: float
+    maze_region_x: float
+    maze_region_y: float
+    maze_region_w: float
+    maze_region_h: float
 
 
 def _difficulty_for_page(page_idx: int, total_pages: int) -> tuple[str, int, int, float]:
@@ -102,10 +100,10 @@ def _layout() -> Layout:
     header_y = top - (PAGE_H * HEADER_H)
     story_y = header_y - (PAGE_H * STORY_H)
 
-    maze_w = PAGE_W * MAZE_W
-    maze_h = PAGE_H * MAZE_H
-    maze_x = (PAGE_W - maze_w) / 2
-    maze_y = (PAGE_H - maze_h) / 2 - (PAGE_H * 0.01)
+    maze_region_x = left
+    maze_region_y = bottom + 12
+    maze_region_w = right - left
+    maze_region_h = (story_y - 10) - maze_region_y
 
     return Layout(
         left=left,
@@ -114,10 +112,10 @@ def _layout() -> Layout:
         top=top,
         header_y=header_y,
         story_y=story_y,
-        maze_x=maze_x,
-        maze_y=maze_y,
-        maze_w=maze_w,
-        maze_h=maze_h,
+        maze_region_x=maze_region_x,
+        maze_region_y=maze_region_y,
+        maze_region_w=maze_region_w,
+        maze_region_h=maze_region_h,
     )
 
 
@@ -210,7 +208,6 @@ def _title_and_story(c: canvas.Canvas, accent: colors.Color, puzzle_no: int, dif
     c.setFont("Helvetica-Bold", 16)
     c.drawString(layout.left + 16, layout.header_y + (title_h * 0.54), line_text)
 
-    # Draw gold stars explicitly to avoid missing-glyph square boxes.
     star_count = _difficulty_stars_count(difficulty)
     star_base_x = layout.left + 16 + (len(line_text) * 7.2) + 12
     star_y = layout.header_y + (title_h * 0.55)
@@ -264,21 +261,26 @@ def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, max_w: float, 
 
 
 def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool, path: list[tuple[int, int]] | None, pair: IconPair) -> None:
-    rows, cols = maze.rows, maze.cols
-    cell = min(layout.maze_w / cols, layout.maze_h / rows)
-    ox = layout.maze_x + (layout.maze_w - cols * cell) / 2
-    oy = layout.maze_y + (layout.maze_h - rows * cell) / 2
+    geom = compute_maze_geometry(
+        maze,
+        page_width=PAGE_W,
+        page_height=PAGE_H,
+        region_x=layout.maze_region_x,
+        region_y=layout.maze_region_y,
+        region_w=layout.maze_region_w,
+        region_h=layout.maze_region_h,
+    )
 
-    def box(rc: tuple[int, int]) -> tuple[float, float, float, float]:
-        r, cc = rc
-        x0 = ox + (cc * cell)
-        y0 = oy + ((rows - 1 - r) * cell)
-        return x0, y0, x0 + cell, y0 + cell
+    # Validation checks for geometry-driven alignment.
+    center_x = geom.offset_x + (geom.maze_width / 2)
+    center_y = geom.offset_y + (geom.maze_height / 2)
+    if abs(center_x - (PAGE_W / 2)) > PAGE_W * 0.06 or abs(center_y - (PAGE_H / 2)) > PAGE_H * 0.10:
+        print("Warning: maze center drift detected; auto-centering has been applied.")
 
     c.setStrokeColor(colors.HexColor("#1F2937"))
-    c.setLineWidth(max(0.95, cell * 0.095))
+    c.setLineWidth(max(0.95, geom.cell_size * 0.095))
     for rc in maze.active_cells:
-        x0, y0, x1, y1 = box(rc)
+        x0, y0, x1, y1 = cell_box(rc, geom)
         w = maze.walls[rc]
         if w["N"]:
             c.line(x0, y1, x1, y1)
@@ -290,10 +292,10 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
             c.line(x1, y0, x1, y1)
 
     c.setStrokeColor(colors.black)
-    c.setLineWidth(max(2.0, cell * 0.17))
+    c.setLineWidth(max(2.0, geom.cell_size * 0.17))
     for rc in maze.active_cells:
         r, cc = rc
-        x0, y0, x1, y1 = box(rc)
+        x0, y0, x1, y1 = cell_box(rc, geom)
         for side, (dr, dc), seg in [
             ("N", (-1, 0), (x0, y1, x1, y1)),
             ("S", (1, 0), (x0, y0, x1, y0)),
@@ -309,40 +311,28 @@ def _draw_maze(c: canvas.Canvas, maze: Maze, layout: Layout, show_solution: bool
                 continue
             c.line(*seg)
 
-    # Opening-aligned icon placement with minimal gap.
-    sx0, sy0, sx1, sy1 = box(maze.start)
-    ex0, ey0, ex1, ey1 = box(maze.end)
-    start_open = {
-        "N": ((sx0 + sx1) / 2, sy1, 0, 1),
-        "S": ((sx0 + sx1) / 2, sy0, 0, -1),
-        "W": (sx0, (sy0 + sy1) / 2, -1, 0),
-        "E": (sx1, (sy0 + sy1) / 2, 1, 0),
-    }[maze.start_open_side]
-    end_open = {
-        "N": ((ex0 + ex1) / 2, ey1, 0, 1),
-        "S": ((ex0 + ex1) / 2, ey0, 0, -1),
-        "W": (ex0, (ey0 + ey1) / 2, -1, 0),
-        "E": (ex1, (ey0 + ey1) / 2, 1, 0),
-    }[maze.end_open_side]
+    start_open_x, start_open_y = opening_point(maze.start, maze.start_open_side, geom)
+    end_open_x, end_open_y = opening_point(maze.end, maze.end_open_side, geom)
 
-    gap = 14.0
-    start_cx = min(layout.right - 18, max(layout.left + 18, start_open[0] + start_open[2] * gap))
-    start_cy = min(layout.top - 18, max(layout.bottom + 18, start_open[1] + start_open[3] * gap))
-    finish_cx = min(layout.right - 18, max(layout.left + 18, end_open[0] + end_open[2] * gap))
-    finish_cy = min(layout.top - 18, max(layout.bottom + 18, end_open[1] + end_open[3] * gap))
+    icon_size = geom.cell_size * 2.2
+    sx, sy = icon_center_from_opening(start_open_x, start_open_y, maze.start_open_side, icon_size, 0.60)
+    ex, ey = icon_center_from_opening(end_open_x, end_open_y, maze.end_open_side, icon_size, 0.40)
 
-    _draw_icon(c, str(pair.start_path), start_cx, start_cy, PAGE_W * 0.16, PAGE_H * 0.17)
-    _draw_icon(c, str(pair.finish_path), finish_cx, finish_cy, PAGE_W * 0.14, PAGE_H * 0.15)
+    sx, sy = clamp_point(sx, sy, layout.left + icon_size * 0.5, layout.bottom + icon_size * 0.5, layout.right - icon_size * 0.5, layout.top - icon_size * 0.5)
+    ex, ey = clamp_point(ex, ey, layout.left + icon_size * 0.5, layout.bottom + icon_size * 0.5, layout.right - icon_size * 0.5, layout.top - icon_size * 0.5)
+
+    _draw_icon(c, str(pair.start_path), sx, sy, icon_size, icon_size)
+    _draw_icon(c, str(pair.finish_path), ex, ey, icon_size, icon_size)
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
-        c.setLineWidth(max(2.0, cell * 0.20))
+        c.setLineWidth(max(2.0, geom.cell_size * 0.20))
         pts = []
         for r, cc in path:
             if (r, cc) not in maze.active_cells:
                 continue
-            x0, y0, _, _ = box((r, cc))
-            pts.append((x0 + cell / 2, y0 + cell / 2))
+            x0, y0, _, _ = cell_box((r, cc), geom)
+            pts.append((x0 + geom.cell_size / 2, y0 + geom.cell_size / 2))
         for i in range(len(pts) - 1):
             c.line(*pts[i], *pts[i + 1])
 
