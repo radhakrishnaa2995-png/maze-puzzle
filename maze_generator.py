@@ -78,6 +78,58 @@ def _allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) -> Set
     return allowed
 
 
+def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) -> Set[Cell]:
+    """Generate noticeably different puzzle silhouettes."""
+    cy = (rows - 1) / 2.0
+    cx = (cols - 1) / 2.0
+    ry = max(1.0, rows * 0.46)
+    rx = max(1.0, cols * 0.46)
+    shape = rng.choice(["ellipse", "diamond", "hourglass", "cross"])
+    allowed: Set[Cell] = set()
+
+    for r in range(rows):
+        for c in range(cols):
+            yn = (r - cy) / ry
+            xn = (c - cx) / rx
+            inside = False
+            if shape == "ellipse":
+                inside = (xn * xn) + (yn * yn) <= 1.0
+            elif shape == "diamond":
+                inside = abs(xn) + abs(yn) <= 1.0
+            elif shape == "hourglass":
+                edge = 0.18 + (0.95 * abs(yn))
+                inside = abs(xn) <= edge and abs(yn) <= 1.0
+            else:  # cross
+                inside = (abs(xn) <= 0.34 and abs(yn) <= 0.98) or (abs(yn) <= 0.34 and abs(xn) <= 0.98)
+
+            if inside:
+                allowed.add((r, c))
+
+    # Keep silhouettes organic.
+    carve_count = {"easy": 2, "medium": 3, "hard": 4}.get(profile, 3)
+    for _ in range(carve_count):
+        side = rng.choice(["N", "S", "W", "E"])
+        depth = rng.randint(1, max(2, rows // 12 if side in {"N", "S"} else cols // 12))
+        span = rng.randint(
+            max(3, cols // 10 if side in {"N", "S"} else rows // 10),
+            max(4, cols // 4 if side in {"N", "S"} else rows // 4),
+        )
+        if side in {"N", "S"}:
+            start_c = rng.randint(1, max(1, cols - span - 1))
+            rr = range(0, depth) if side == "N" else range(rows - depth, rows)
+            for r in rr:
+                for c in range(start_c, min(cols - 1, start_c + span)):
+                    allowed.discard((r, c))
+        else:
+            start_r = rng.randint(1, max(1, rows - span - 1))
+            cc = range(0, depth) if side == "W" else range(cols - depth, cols)
+            for c in cc:
+                for r in range(start_r, min(rows - 1, start_r + span)):
+                    allowed.discard((r, c))
+
+    return allowed
+
+
 def _boundary_sides(cell: Cell, active: Set[Cell], rows: int, cols: int) -> List[str]:
     r, c = cell
     sides: list[str] = []
@@ -388,7 +440,11 @@ def generate_maze(
         loop_factor = 0.10
         branch_bias = 0.35
 
-    active = _allowed_mask(rows, cols, rng, profile)
+    # Randomly vary maze silhouettes so puzzle shapes are clearly different.
+    if rng.random() < 0.30:
+        active = _allowed_mask(rows, cols, rng, profile)
+    else:
+        active = _shape_allowed_mask(rows, cols, rng, profile)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
     # Architecture rule: choose entry/exit from intended image flow first.
