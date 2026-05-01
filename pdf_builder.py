@@ -228,9 +228,7 @@ def _draw_cover(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(colors.HexColor("#475569"))
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.58, "Easy • Medium • Hard")
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.53, "Ages 4–8")
-
-
-def _draw_instructions(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
+    def _draw_instructions(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     _draw_page_frame(c, bg, layout)
     c.setFillColor(colors.HexColor("#0F172A"))
     c.setFont("Helvetica-Bold", 28)
@@ -369,24 +367,22 @@ def _extract_corridor_path(maze: Maze) -> list[tuple[int, int]]:
         cur = stack.pop()
         if cur == end:
             break
-        for side, (dr, dc) in {"N":(-1,0),"S":(1,0),"W":(0,-1),"E":(0,1)}.items():
+        for side, (dr, dc) in {"N": (-1, 0), "S": (1, 0), "W": (0, -1), "E": (0, 1)}.items():
             if maze.walls[cur][side]:
                 continue
-            nxt = (cur[0]+dr, cur[1]+dc)
+            nxt = (cur[0] + dr, cur[1] + dc)
             if nxt in maze.active_cells and nxt not in prev:
                 prev[nxt] = cur
                 stack.append(nxt)
     if end not in prev:
         return [start, end]
-    out=[]
-    cur=end
+    out = []
+    cur = end
     while cur is not None:
         out.append(cur)
-        cur=prev[cur]
+        cur = prev[cur]
     return list(reversed(out))
-
-
-def _draw_maze(
+    def _draw_maze(
     c: canvas.Canvas,
     maze: Maze,
     layout: Layout,
@@ -552,7 +548,16 @@ def build_book(
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
             custom_pair = anchor_cycle[idx % len(anchor_cycle)]
             start_anchor, end_anchor = _corner_bias_pair(idx, custom_pair)
-            candidate = generate_maze(rows, cols, pair.key, diff_factor, prng, start_anchor=start_anchor, end_anchor=end_anchor, forced_shape=shape_plan[idx])
+            candidate = generate_maze(
+                rows,
+                cols,
+                pair.key,
+                diff_factor,
+                prng,
+                start_anchor=start_anchor,
+                end_anchor=end_anchor,
+                forced_shape=shape_plan[idx],
+            )
             candidate.difficulty = diff_name
             candidate_path = solve_maze(candidate)
             if not candidate_path:
@@ -594,7 +599,7 @@ def build_book(
                             prng,
                             start_anchor=start_anchor,
                             end_anchor=end_anchor,
-                            forced_shape=forced
+                            forced_shape=forced,
                         )
                         candidate.difficulty = diff_name
                         candidate_path = solve_maze(candidate)
@@ -627,7 +632,16 @@ def build_book(
 
         _draw_page_frame(c, bg_order[page_no - 1], layout)
         _title_and_story(c, ACCENTS[idx % len(ACCENTS)], idx + 1, diff_name, pair, layout)
-        _draw_maze(c, maze, layout, show_solution=False, path=None, pair=pair, icon_scale=icon_scale, bg_color=bg_order[page_no - 1])
+        _draw_maze(
+            c,
+            maze,
+            layout,
+            show_solution=False,
+            path=None,
+            pair=pair,
+            icon_scale=icon_scale,
+            bg_color=bg_order[page_no - 1],
+        )
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
