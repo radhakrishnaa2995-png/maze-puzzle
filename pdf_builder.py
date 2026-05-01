@@ -289,9 +289,22 @@ def _prepare_icon_reader(path: str) -> ImageReader:
     rgb = arr[:, :, :3].astype(np.int16)
     alpha = arr[:, :, 3].astype(np.uint8)
 
-    near_white = (rgb[:, :, 0] >= 250) & (rgb[:, :, 1] >= 250) & (rgb[:, :, 2] >= 250)
-    alpha[near_white] = 0
+    near_white = (rgb[:, :, 0] >= 250) & (rgb[:, :, 1] >= 250) & (rgb[:, :, 2] >= 250) & (alpha > 0)
 
+    # Remove only corner-connected white background so white details inside icons are preserved.
+    h, w = near_white.shape
+    bg = np.zeros((h, w), dtype=bool)
+    stack = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
+    while stack:
+        y, x = stack.pop()
+        if y < 0 or x < 0 or y >= h or x >= w:
+            continue
+        if bg[y, x] or not near_white[y, x]:
+            continue
+        bg[y, x] = True
+        stack.extend([(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)])
+
+    alpha[bg] = 0
     arr[:, :, 3] = alpha
     cleaned = Image.fromarray(arr, mode="RGBA")
     buf = BytesIO()
@@ -325,7 +338,7 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     max_x = PAGE_W - margin
 
     # Fixed large icon size (same on every page).
-    fixed_icon_size = PAGE_W * 0.18
+    fixed_icon_size = PAGE_W * 0.15
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
         factor = 0.5 + (gap / size)
