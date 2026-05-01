@@ -105,16 +105,16 @@ def _difficulty_for_page(page_idx: int, total_pages: int, profiles: dict[str, An
         pr = profiles.get("easy", {})
         rr = pr.get("rows_range", [14, 18])
         cr = pr.get("cols_range", [14, 18])
-        return "Easy", int(rr[0]), int(cr[0]), 0.18
+        return "Easy", int(rr[0]), int(cr[0]), 0.22
     if progress <= 0.70:
         pr = profiles.get("medium", {})
         rr = pr.get("rows_range", [18, 24])
         cr = pr.get("cols_range", [20, 28])
-        return "Medium", int((rr[0] + rr[1]) / 2), int((cr[0] + cr[1]) / 2), 0.56
+        return "Medium", int((rr[0] + rr[1]) / 2), int((cr[0] + cr[1]) / 2), 0.62
     pr = profiles.get("hard", {})
     rr = pr.get("rows_range", [24, 32])
     cr = pr.get("cols_range", [28, 38])
-    return "Hard", int(rr[1]), int(cr[1]), 0.92
+    return "Hard", int(rr[1]), int(cr[1]), 0.98
 
 
 def _difficulty_stars_count(name: str) -> int:
@@ -449,23 +449,6 @@ def _draw_maze(
     c.setLineWidth(outer_line_width)
     for seg in outer_segments:
         c.line(*seg)
-
-    start_open_x, start_open_y = opening_point(maze.start, maze.start_open_side, geom)
-    end_open_x, end_open_y = opening_point(maze.end, maze.end_open_side, geom)
-
-    marker_r = max(6.0, geom.cell_size * 0.18)
-    c.setFillColor(colors.HexColor("#16A34A"))
-    c.setStrokeColor(colors.white)
-    c.setLineWidth(1.2)
-    c.circle(start_open_x, start_open_y, marker_r, stroke=1, fill=1)
-    c.setFillColor(colors.HexColor("#B91C1C"))
-    c.circle(end_open_x, end_open_y, marker_r, stroke=1, fill=1)
-
-    c.setFillColor(colors.HexColor("#065F46"))
-    c.setFont("Helvetica-Bold", 8)
-    c.drawCentredString(start_open_x, start_open_y + marker_r + 3.5, "START")
-    c.setFillColor(colors.HexColor("#7F1D1D"))
-    c.drawCentredString(end_open_x, end_open_y + marker_r + 3.5, "FINISH")
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
