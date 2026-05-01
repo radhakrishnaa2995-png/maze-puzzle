@@ -193,7 +193,6 @@ def _shape_cycle(total: int, rng: random.Random) -> list[str]:
 def _draw_page_frame(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
-    # Intentionally no page border for a clean full-bleed worksheet look.
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
@@ -228,7 +227,9 @@ def _draw_cover(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(colors.HexColor("#475569"))
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.58, "Easy • Medium • Hard")
     c.drawCentredString(PAGE_W / 2, PAGE_H * 0.53, "Ages 4–8")
-    def _draw_instructions(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
+
+
+def _draw_instructions(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     _draw_page_frame(c, bg, layout)
     c.setFillColor(colors.HexColor("#0F172A"))
     c.setFont("Helvetica-Bold", 28)
@@ -282,7 +283,6 @@ def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple
 
 
 def _prepare_icon_reader(path: str) -> ImageReader:
-    # Preserve full icon pixels; no aggressive cleanup that can clip details.
     img = Image.open(path).convert("RGBA")
     buf = BytesIO()
     img.save(buf, format="PNG")
@@ -308,13 +308,11 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
 
     margin = 10.0
     gap = 5.0
-    # Keep all icons strictly below story text to avoid overlap.
     max_icon_top = min(layout.story_y - 6.0, PAGE_H - margin)
     min_icon_bottom = margin
     min_x = margin
     max_x = PAGE_W - margin
 
-    # Fixed large icon size (same on every page).
     fixed_icon_size = PAGE_W * 0.15
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
@@ -331,10 +329,8 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
     e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
     if not (s_fit and e_fit):
-        # Strict rule: same icon size everywhere; reject candidate if it doesn't fit.
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
-    # Reject center-ish side placements; require corner-biased positions.
     quarter_y_low = PAGE_H * 0.30
     quarter_y_high = PAGE_H * 0.70
     quarter_x_low = PAGE_W * 0.30
@@ -348,7 +344,6 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     if exit_side in {"N", "S"} and (quarter_x_low <= end_open_x <= quarter_x_high):
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
-    # Disallow icon overlap; both icons must exist distinctly.
     overlap = not (
         (s_left + shared_size + 2.0) <= e_left
         or (e_left + shared_size + 2.0) <= s_left
@@ -382,7 +377,9 @@ def _extract_corridor_path(maze: Maze) -> list[tuple[int, int]]:
         out.append(cur)
         cur = prev[cur]
     return list(reversed(out))
-    def _draw_maze(
+
+
+def _draw_maze(
     c: canvas.Canvas,
     maze: Maze,
     layout: Layout,
@@ -431,7 +428,7 @@ def _extract_corridor_path(maze: Maze) -> list[tuple[int, int]]:
             p.lineTo(x, y)
         c.drawPath(p, stroke=1, fill=0)
 
-    outer_segments: list[tuple[float, float, float, float]] = []  # kept for icon tuck-under pass
+    outer_segments: list[tuple[float, float, float, float]] = []
     for rc in maze.active_cells:
         r, cc = rc
         x0, y0, x1, y1 = cell_box(rc, geom)
@@ -455,7 +452,6 @@ def _extract_corridor_path(maze: Maze) -> list[tuple[int, int]]:
     end_left, end_bottom = icon_place.end_left, icon_place.end_bottom
     shared_size = icon_place.size
 
-    # Final validation guards.
     if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
         raise ValueError("Maze geometry escaped reserved vertical zone.")
     if not icon_place.valid:
@@ -464,13 +460,11 @@ def _extract_corridor_path(maze: Maze) -> list[tuple[int, int]]:
     _draw_icon(c, str(pair.start_path), start_left + (shared_size / 2), start_bottom + (shared_size / 2), shared_size, shared_size)
     _draw_icon(c, str(pair.finish_path), end_left + (shared_size / 2), end_bottom + (shared_size / 2), shared_size, shared_size)
 
-    # Cover pass: hide icon edge under frame so icon looks tucked into maze side.
     c.setStrokeColor(bg_color)
     c.setLineWidth(max(outer_line_width * 6.0, shared_size * 0.20))
     for seg in outer_segments:
         c.line(*seg)
 
-    # Draw maze outline after icons so icon sides appear tucked under the border.
     c.setStrokeColor(wall_color)
     c.setLineWidth(outer_line_width)
     for seg in outer_segments:
