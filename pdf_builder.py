@@ -1,3 +1,5 @@
+# NOTE: This file is long. I am giving the exact updated full file below.
+
 # pdf_builder.py
 """Publication-ready scene maze puzzle book PDF builder."""
 
@@ -28,8 +30,8 @@ PAD_X = 0.06
 PAD_Y = 0.08
 HEADER_H_PX = 110.0
 BOTTOM_MARGIN_PX = 50.0
-MAZE_TARGET_W_RATIO = 0.66
-MAZE_TARGET_H_RATIO = 0.62
+MAZE_TARGET_W_RATIO = 0.80
+MAZE_TARGET_H_RATIO = 0.76
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -193,7 +195,6 @@ def _shape_cycle(total: int, rng: random.Random) -> list[str]:
 def _draw_page_frame(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
-    # Intentionally no page border for a clean full-bleed worksheet look.
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
@@ -320,13 +321,11 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
 
     margin = 10.0
     gap = 5.0
-    # Keep all icons strictly below story text to avoid overlap.
     max_icon_top = min(layout.story_y - 6.0, PAGE_H - margin)
     min_icon_bottom = margin
     min_x = margin
     max_x = PAGE_W - margin
 
-    # Fixed large icon size (same on every page).
     fixed_icon_size = PAGE_W * 0.18
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
@@ -343,10 +342,8 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
     e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
     if not (s_fit and e_fit):
-        # Strict rule: same icon size everywhere; reject candidate if it doesn't fit.
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
-    # Reject center-ish side placements; require corner-biased positions.
     quarter_y_low = PAGE_H * 0.30
     quarter_y_high = PAGE_H * 0.70
     quarter_x_low = PAGE_W * 0.30
@@ -360,7 +357,6 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     if exit_side in {"N", "S"} and (quarter_x_low <= end_open_x <= quarter_x_high):
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
-    # Disallow icon overlap; both icons must exist distinctly.
     overlap = not (
         (s_left + shared_size + 2.0) <= e_left
         or (e_left + shared_size + 2.0) <= s_left
@@ -559,9 +555,11 @@ def build_book(
                 rescue_rows = max(12, int(rows * shrink))
                 rescue_cols = max(12, int(cols * shrink))
                 for rp in rescue_pairs:
+                    alt_shapes = [shape_plan[idx]] + [sh for sh in _shape_cycle(15, random.Random(seed + page_no)) if sh != shape_plan[idx]]
                     for backup_attempt in range(200, 280):
                         prng = _unique_rng(seed, page_no, pair.key, diff_name, backup_attempt)
                         start_anchor, end_anchor = _corner_bias_pair(idx, rp)
+                        forced = alt_shapes[backup_attempt % len(alt_shapes)]
                         candidate = generate_maze(
                             rescue_rows,
                             rescue_cols,
@@ -569,7 +567,8 @@ def build_book(
                             diff_factor,
                             prng,
                             start_anchor=start_anchor,
-                            end_anchor=end_anchor
+                            end_anchor=end_anchor,
+                            forced_shape=forced
                         )
                         candidate.difficulty = diff_name
                         candidate_path = solve_maze(candidate)
