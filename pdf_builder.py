@@ -176,7 +176,6 @@ def _icon_plan(pages: int, pairs: list[IconPair], seed: int) -> list[IconPair]:
 def _draw_page_frame(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
-    # Intentionally no page border for a clean full-bleed worksheet look.
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
@@ -327,7 +326,6 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     maze_bottom = geom.offset_y
     maze_top = geom.offset_y + geom.maze_height
 
-    # Ensure icons stay outside maze box to preserve clean path entry/exit.
     s_inside_maze = (
         (start_left < maze_right)
         and (start_left + icon_size > maze_left)
@@ -341,7 +339,6 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
         and (end_bottom + icon_size > maze_bottom)
     )
 
-    # Keep icons inside page safe content area.
     margin = 4.0
     in_bounds = all(
         [
@@ -394,8 +391,11 @@ def _draw_maze(
     maze_line_width = min(1.8, max(1.2, geom.cell_size * 0.10))
     outer_line_width = min(3.0, max(2.5, geom.cell_size * 0.20))
 
-    c.setStrokeColor(colors.HexColor("#1F2937"))
+    wall_color = colors.HexColor("#111827")
+    c.setStrokeColor(wall_color)
     c.setLineWidth(maze_line_width)
+    c.setLineCap(1)
+    c.setLineJoin(1)
     for rc in maze.active_cells:
         x0, y0, x1, y1 = cell_box(rc, geom)
         w = maze.walls[rc]
@@ -432,7 +432,6 @@ def _draw_maze(
     end_left, end_bottom = icon_place.end_left, icon_place.end_bottom
     shared_size = icon_place.size
 
-    # Final validation guards.
     if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
         raise ValueError("Maze geometry escaped reserved vertical zone.")
     if not icon_place.valid:
@@ -441,19 +440,16 @@ def _draw_maze(
     _draw_icon(c, str(pair.start_path), start_left + (shared_size / 2), start_bottom + (shared_size / 2), shared_size, shared_size)
     _draw_icon(c, str(pair.finish_path), end_left + (shared_size / 2), end_bottom + (shared_size / 2), shared_size, shared_size)
 
-    # Cover pass: hide icon edge under frame so icon looks tucked into maze side.
     c.setStrokeColor(bg_color)
     c.setLineWidth(max(outer_line_width * 6.0, shared_size * 0.20))
     for seg in outer_segments:
         c.line(*seg)
 
-    # Draw maze outline after icons so icon sides appear tucked under the border.
-    c.setStrokeColor(colors.black)
+    c.setStrokeColor(wall_color)
     c.setLineWidth(outer_line_width)
     for seg in outer_segments:
         c.line(*seg)
 
-    # Explicitly mark where to start and finish.
     start_open_x, start_open_y = opening_point(maze.start, maze.start_open_side, geom)
     end_open_x, end_open_y = opening_point(maze.end, maze.end_open_side, geom)
 
@@ -517,12 +513,10 @@ def build_book(
     profiles = difficulty_profiles or DEFAULT_DIFFICULTY_PROFILES
     bg_order = _palette_cycle(pages + 8, rng)
 
-    # Cover
     _draw_cover(c, bg_order[0], layout)
     _draw_bottom_page_no(c, 1)
     c.showPage()
 
-    # Instructions
     _draw_instructions(c, bg_order[1], layout)
     _draw_bottom_page_no(c, 2)
     c.showPage()
@@ -538,7 +532,6 @@ def build_book(
         solution: list[tuple[int, int]] | None = None
         sig: str | None = None
 
-        # Attempt with profile dimensions first.
         for attempt in range(40):
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
             start_anchor, end_anchor = _corner_bias_pair(idx, pair)
@@ -578,7 +571,6 @@ def build_book(
             sig = candidate_sig
             break
 
-        # Rescue fallback dimensions if needed.
         if maze is None:
             rescue_profiles = [
                 (max(12, rows - 2), max(12, cols - 2)),
@@ -631,7 +623,6 @@ def build_book(
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
-    # Solutions title page
     solution_title_page = pages + 3
     _draw_page_frame(c, bg_order[solution_title_page - 1], layout)
     c.setFillColor(colors.HexColor("#0F172A"))
@@ -640,7 +631,6 @@ def build_book(
     _draw_bottom_page_no(c, solution_title_page)
     c.showPage()
 
-    # Solution pages
     for i, puzzle in enumerate(puzzles, start=1):
         page_no = solution_title_page + i
         _draw_page_frame(c, bg_order[(solution_title_page + i - 1) % len(bg_order)], layout)
@@ -658,7 +648,6 @@ def build_book(
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
-    # Final congratulation page
     final_page_no = solution_title_page + len(puzzles) + 1
     _draw_page_frame(c, bg_order[(final_page_no - 1) % len(bg_order)], layout)
     c.setFillColor(colors.HexColor("#0F172A"))
