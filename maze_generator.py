@@ -429,6 +429,49 @@ def _carve_kruskal(
             walls[nxt][OPPOSITE[side]] = False
 
 
+def _path_cells(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> list[Cell]:
+    from collections import deque
+    q = deque([start])
+    prev: dict[Cell, Cell | None] = {start: None}
+    while q:
+        cur = q.popleft()
+        if cur == end:
+            break
+        for side, nxt in _neighbors(cur, rows, cols):
+            if nxt not in active or nxt in prev:
+                continue
+            if walls[cur][side]:
+                continue
+            prev[nxt] = cur
+            q.append(nxt)
+    if end not in prev:
+        return [start, end]
+    path: list[Cell] = []
+    cur: Cell | None = end
+    while cur is not None:
+        path.append(cur)
+        cur = prev[cur]
+    path.reverse()
+    return path
+
+
+def _enforce_single_corridor(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> None:
+    path = _path_cells(start, end, active, walls, rows, cols)
+    # Block every side by default.
+    for cell in active:
+        walls[cell] = {"N": True, "S": True, "W": True, "E": True}
+    # Open only the corridor edges along the chosen path.
+    for a, b in zip(path, path[1:]):
+        ar, ac = a
+        br, bc = b
+        dr, dc = br - ar, bc - ac
+        side = next((k for k, v in DIRS.items() if v == (dr, dc)), None)
+        if side is None:
+            continue
+        walls[a][side] = False
+        walls[b][OPPOSITE[side]] = False
+
+
 def maze_signature(maze: Maze) -> str:
     bits = []
     for cell in sorted(maze.active_cells):
@@ -523,6 +566,7 @@ def generate_maze(
         _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
     # Keep a single-solution maze (tree): do not add extra loops.
     _force_connect(start, end, active, walls, rows, cols)
+    _enforce_single_corridor(start, end, active, walls, rows, cols)
 
     walls[start][start_side] = False
     walls[end][end_side] = False
