@@ -457,9 +457,15 @@ def _path_cells(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dic
 
 def _enforce_single_corridor(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> None:
     path = _path_cells(start, end, active, walls, rows, cols)
-    # Block every side by default.
-    for cell in active:
-        walls[cell] = {"N": True, "S": True, "W": True, "E": True}
+    path_set = set(path)
+    active.clear()
+    active.update(path_set)
+    # Block every side by default for corridor cells only.
+    for cell in list(walls.keys()):
+        if cell in path_set:
+            walls[cell] = {"N": True, "S": True, "W": True, "E": True}
+        else:
+            walls.pop(cell, None)
     # Open only the corridor edges along the chosen path.
     for a, b in zip(path, path[1:]):
         ar, ac = a
