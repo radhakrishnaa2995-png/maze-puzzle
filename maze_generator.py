@@ -84,7 +84,7 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) 
     cx = (cols - 1) / 2.0
     ry = max(1.0, rows * 0.46)
     rx = max(1.0, cols * 0.46)
-    shape = rng.choice(["ellipse", "diamond", "hourglass", "cross"])
+    shape = rng.choice(["square", "rectangle", "diamond", "hexagon", "circle"])
     allowed: Set[Cell] = set()
 
     for r in range(rows):
@@ -92,15 +92,16 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) 
             yn = (r - cy) / ry
             xn = (c - cx) / rx
             inside = False
-            if shape == "ellipse":
+            if shape == "circle":
                 inside = (xn * xn) + (yn * yn) <= 1.0
             elif shape == "diamond":
                 inside = abs(xn) + abs(yn) <= 1.0
-            elif shape == "hourglass":
-                edge = 0.18 + (0.95 * abs(yn))
-                inside = abs(xn) <= edge and abs(yn) <= 1.0
-            else:  # cross
-                inside = (abs(xn) <= 0.34 and abs(yn) <= 0.98) or (abs(yn) <= 0.34 and abs(xn) <= 0.98)
+            elif shape == "square":
+                inside = abs(xn) <= 0.88 and abs(yn) <= 0.88
+            elif shape == "rectangle":
+                inside = abs(xn) <= 0.96 and abs(yn) <= 0.62
+            else:  # hexagon
+                inside = abs(xn) <= 0.90 and abs(yn) <= 0.86 and (abs(xn) * 0.58 + abs(yn)) <= 1.0
 
             if inside:
                 allowed.add((r, c))
