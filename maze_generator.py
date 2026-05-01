@@ -79,16 +79,16 @@ def _allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) -> Set
     return allowed
 
 
-def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) -> Set[Cell]:
+def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str, forced_shape: str | None = None) -> Set[Cell]:
     """Generate noticeably different puzzle silhouettes."""
     cy = (rows - 1) / 2.0
     cx = (cols - 1) / 2.0
     ry = max(1.0, rows * 0.46)
     rx = max(1.0, cols * 0.46)
-    shapes = ["square", "rectangle", "diamond", "hexagon", "circle", "triangle", "octagon", "cross", "pentagon", "kite", "trapezoid"]
+    shapes = ["square", "rectangle", "diamond", "hexagon", "circle", "triangle", "octagon", "cross", "pentagon", "kite", "trapezoid", "parallelogram", "rhombus", "ellipse", "arrow"]
     global _LAST_SHAPE
     candidates = [sh for sh in shapes if sh != _LAST_SHAPE] or shapes
-    shape = rng.choice(candidates)
+    shape = forced_shape if forced_shape in shapes else rng.choice(candidates)
     _LAST_SHAPE = shape
     allowed: Set[Cell] = set()
 
@@ -118,9 +118,18 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) 
                 inside = abs(xn) <= 0.92 and yn >= -0.92 and yn <= 0.92 and (abs(xn) * 0.55 + yn) <= 0.95
             elif shape == "kite":
                 inside = (abs(xn) + abs(yn) * 0.68) <= 0.98 and yn <= 0.98
-            else:  # trapezoid
+            elif shape == "trapezoid":
                 half_w = 0.35 + ((0.92 - 0.35) * (0.95 - (yn + 1.0) * 0.5))
                 inside = yn >= -0.9 and yn <= 0.9 and abs(xn) <= half_w
+            elif shape == "parallelogram":
+                sx = xn - (yn * 0.38)
+                inside = abs(sx) <= 0.82 and abs(yn) <= 0.82
+            elif shape == "rhombus":
+                inside = abs(xn) * 0.85 + abs(yn) <= 0.98
+            elif shape == "ellipse":
+                inside = (xn * xn) / 1.0 + (yn * yn) / 0.62 <= 1.0
+            else:  # arrow
+                inside = (yn <= 0.15 and abs(xn) <= 0.30) or (yn > 0.15 and yn <= 0.92 and abs(xn) <= (0.96 - yn))
 
             if inside:
                 allowed.add((r, c))
@@ -436,6 +445,7 @@ def generate_maze(
     rng: random.Random,
     start_anchor: str = "tl",
     end_anchor: str = "br",
+    forced_shape: str | None = None,
 ) -> Maze:
     # Difficulty tuning focused on visual differentiation.
     if difficulty_factor <= 0.30:
@@ -461,9 +471,10 @@ def generate_maze(
         branch_bias = 0.25
 
     # Use geometric silhouette masks by default for clearer requested shape variety.
-    active = _shape_allowed_mask(rows, cols, rng, profile)
+    active = _shape_allowed_mask(rows, cols, rng, profile, forced_shape=forced_shape)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
+    # Architecture rule: choose entry/exit from intended image flow first.
     anchor_side = {
         "left": "W",
         "right": "E",
@@ -510,7 +521,7 @@ def generate_maze(
         _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=max(0.10, straight_pref * 0.72))
     else:
         _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
-    _add_loops(active, walls, rows, cols, rng, loop_factor)
+    # Keep a single-solution maze (tree): do not add extra loops.
     _force_connect(start, end, active, walls, rows, cols)
 
     walls[start][start_side] = False
