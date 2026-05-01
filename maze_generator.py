@@ -84,7 +84,7 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) 
     cx = (cols - 1) / 2.0
     ry = max(1.0, rows * 0.46)
     rx = max(1.0, cols * 0.46)
-    shape = rng.choice(["square", "rectangle", "diamond", "hexagon", "circle"])
+    shape = rng.choice(["square", "rectangle", "diamond", "hexagon", "circle", "triangle", "octagon", "cross"])
     allowed: Set[Cell] = set()
 
     for r in range(rows):
@@ -100,8 +100,14 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) 
                 inside = abs(xn) <= 0.88 and abs(yn) <= 0.88
             elif shape == "rectangle":
                 inside = abs(xn) <= 0.96 and abs(yn) <= 0.62
-            else:  # hexagon
+            elif shape == "hexagon":
                 inside = abs(xn) <= 0.90 and abs(yn) <= 0.86 and (abs(xn) * 0.58 + abs(yn)) <= 1.0
+            elif shape == "triangle":
+                inside = yn >= -0.9 and yn <= 0.9 and abs(xn) <= (0.95 - ((yn + 0.9) / 1.8) * 0.95)
+            elif shape == "octagon":
+                inside = abs(xn) <= 0.92 and abs(yn) <= 0.92 and (abs(xn) + abs(yn)) <= 1.40
+            else:  # cross
+                inside = (abs(xn) <= 0.30 and abs(yn) <= 0.94) or (abs(yn) <= 0.30 and abs(xn) <= 0.94)
 
             if inside:
                 allowed.add((r, c))
@@ -441,11 +447,8 @@ def generate_maze(
         loop_factor = 0.10
         branch_bias = 0.35
 
-    # Randomly vary maze silhouettes so puzzle shapes are clearly different.
-    if rng.random() < 0.30:
-        active = _allowed_mask(rows, cols, rng, profile)
-    else:
-        active = _shape_allowed_mask(rows, cols, rng, profile)
+    # Use geometric silhouette masks by default for clearer requested shape variety.
+    active = _shape_allowed_mask(rows, cols, rng, profile)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
     # Architecture rule: choose entry/exit from intended image flow first.
