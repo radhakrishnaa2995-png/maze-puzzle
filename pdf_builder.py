@@ -284,31 +284,10 @@ def _fit_image_box(img_reader: ImageReader, max_w: float, max_h: float) -> tuple
 
 
 def _prepare_icon_reader(path: str) -> ImageReader:
+    # Preserve full icon pixels; no aggressive cleanup that can clip details.
     img = Image.open(path).convert("RGBA")
-    arr = np.array(img, dtype=np.uint8)
-    rgb = arr[:, :, :3].astype(np.int16)
-    alpha = arr[:, :, 3].astype(np.uint8)
-
-    near_white = (rgb[:, :, 0] >= 250) & (rgb[:, :, 1] >= 250) & (rgb[:, :, 2] >= 250) & (alpha > 0)
-
-    # Remove only corner-connected white background so white details inside icons are preserved.
-    h, w = near_white.shape
-    bg = np.zeros((h, w), dtype=bool)
-    stack = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
-    while stack:
-        y, x = stack.pop()
-        if y < 0 or x < 0 or y >= h or x >= w:
-            continue
-        if bg[y, x] or not near_white[y, x]:
-            continue
-        bg[y, x] = True
-        stack.extend([(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)])
-
-    alpha[bg] = 0
-    arr[:, :, 3] = alpha
-    cleaned = Image.fromarray(arr, mode="RGBA")
     buf = BytesIO()
-    cleaned.save(buf, format="PNG")
+    img.save(buf, format="PNG")
     buf.seek(0)
     return ImageReader(buf)
 
@@ -382,6 +361,31 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     return IconPlacement(s_left, s_bottom, e_left, e_bottom, shared_size, valid)
 
 
+def _extract_corridor_path(maze: Maze) -> list[tuple[int, int]]:
+    start, end = maze.start, maze.end
+    stack = [start]
+    prev = {start: None}
+    while stack:
+        cur = stack.pop()
+        if cur == end:
+            break
+        for side, (dr, dc) in {"N":(-1,0),"S":(1,0),"W":(0,-1),"E":(0,1)}.items():
+            if maze.walls[cur][side]:
+                continue
+            nxt = (cur[0]+dr, cur[1]+dc)
+            if nxt in maze.active_cells and nxt not in prev:
+                prev[nxt] = cur
+                stack.append(nxt)
+    if end not in prev:
+        return [start, end]
+    out=[]
+    cur=end
+    while cur is not None:
+        out.append(cur)
+        cur=prev[cur]
+    return list(reversed(out))
+
+
 def _draw_maze(
     c: canvas.Canvas,
     maze: Maze,
@@ -412,22 +416,26 @@ def _draw_maze(
 
     wall_color = colors.HexColor("#111827")
     c.setStrokeColor(wall_color)
-    c.setLineWidth(maze_line_width)
+    c.setLineWidth(max(maze_line_width * 1.35, 2.2))
     c.setLineCap(1)
     c.setLineJoin(1)
-    for rc in maze.active_cells:
-        x0, y0, x1, y1 = cell_box(rc, geom)
-        w = maze.walls[rc]
-        if w["N"]:
-            c.line(x0, y1, x1, y1)
-        if w["S"]:
-            c.line(x0, y0, x1, y0)
-        if w["W"]:
-            c.line(x0, y0, x0, y1)
-        if w["E"]:
-            c.line(x1, y0, x1, y1)
+    corridor = _extract_corridor_path(maze)
+    if len(corridor) >= 2:
+        pts = []
+        sx, sy = opening_point(maze.start, maze.start_open_side, geom)
+        ex, ey = opening_point(maze.end, maze.end_open_side, geom)
+        pts.append((sx, sy))
+        for rc in corridor:
+            x0, y0, x1, y1 = cell_box(rc, geom)
+            pts.append(((x0 + x1) / 2, (y0 + y1) / 2))
+        pts.append((ex, ey))
+        p = c.beginPath()
+        p.moveTo(*pts[0])
+        for x, y in pts[1:]:
+            p.lineTo(x, y)
+        c.drawPath(p, stroke=1, fill=0)
 
-    outer_segments: list[tuple[float, float, float, float]] = []
+    outer_segments: list[tuple[float, float, float, float]] = []  # kept for icon tuck-under pass
     for rc in maze.active_cells:
         r, cc = rc
         x0, y0, x1, y1 = cell_box(rc, geom)
