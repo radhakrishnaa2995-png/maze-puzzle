@@ -286,44 +286,75 @@ def _prepare_icon_reader(path: str) -> ImageReader:
         return ImageReader(bio)
 
 
-def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float) -> IconPlacement:
-    open_sx, open_sy = opening_point(maze.start, maze.start_open_side, geom)
-    open_ex, open_ey = opening_point(maze.end, maze.end_open_side, geom)
-
-    icon_size = max(46.0, min(120.0, geom.cell_size * 3.2 * icon_scale))
-    offset_factor = 0.95
-
-    sx, sy = icon_center_from_opening(open_sx, open_sy, maze.start_open_side, icon_size, offset_factor)
-    ex, ey = icon_center_from_opening(open_ex, open_ey, maze.end_open_side, icon_size, offset_factor)
-
-    margin = 6.0
-    sx = max(layout.left + icon_size / 2 + margin, min(layout.right - icon_size / 2 - margin, sx))
-    sy = max(layout.bottom + icon_size / 2 + margin, min(layout.top - icon_size / 2 - margin, sy))
-    ex = max(layout.left + icon_size / 2 + margin, min(layout.right - icon_size / 2 - margin, ex))
-    ey = max(layout.bottom + icon_size / 2 + margin, min(layout.top - icon_size / 2 - margin, ey))
-
-    start_left = sx - icon_size / 2
-    start_bottom = sy - icon_size / 2
-    end_left = ex - icon_size / 2
-    end_bottom = ey - icon_size / 2
-
-    overlap = not (
-        (start_left + icon_size) < end_left
-        or (end_left + icon_size) < start_left
-        or (start_bottom + icon_size) < end_bottom
-        or (end_bottom + icon_size) < start_bottom
+def _draw_icon(c: canvas.Canvas, path: str, cx: float, cy: float, max_w: float, max_h: float) -> None:
+    img = _prepare_icon_reader(path)
+    w, h = _fit_image_box(img, max_w, max_h)
+    c.drawImage(
+        img,
+        cx - (w / 2),
+        cy - (h / 2),
+        width=w,
+        height=h,
+        mask="auto",
+        preserveAspectRatio=True,
+        anchor="c",
     )
 
-    maze_min_x = geom.offset_x
-    maze_max_x = geom.offset_x + geom.maze_width
-    maze_min_y = geom.offset_y
-    maze_max_y = geom.offset_y + geom.maze_height
 
-    def _rect_overlap(ax: float, ay: float, aw: float, ah: float, bx: float, by: float, bw: float, bh: float) -> bool:
-        return not ((ax + aw) <= bx or (bx + bw) <= ax or (ay + ah) <= by or (by + bh) <= ay)
+def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float) -> IconPlacement:
+    icon_size = max(46.0, min(104.0, geom.cell_size * (2.2 + icon_scale * 1.8)))
 
-    start_over_maze = _rect_overlap(start_left, start_bottom, icon_size, icon_size, maze_min_x, maze_min_y, geom.maze_width, geom.maze_height)
-    end_over_maze = _rect_overlap(end_left, end_bottom, icon_size, icon_size, maze_min_x, maze_min_y, geom.maze_width, geom.maze_height)
+    sx, sy = opening_point(maze.start, maze.start_open_side, geom)
+    ex, ey = opening_point(maze.end, maze.end_open_side, geom)
+
+    sx, sy = icon_center_from_opening(sx, sy, maze.start_open_side, icon_size, 0.64)
+    ex, ey = icon_center_from_opening(ex, ey, maze.end_open_side, icon_size, 0.64)
+
+    start_left = sx - (icon_size / 2)
+    start_bottom = sy - (icon_size / 2)
+    end_left = ex - (icon_size / 2)
+    end_bottom = ey - (icon_size / 2)
+
+    overlap = not (
+        (start_left + icon_size) <= end_left
+        or (end_left + icon_size) <= start_left
+        or (start_bottom + icon_size) <= end_bottom
+        or (end_bottom + icon_size) <= start_bottom
+    )
+
+    maze_left = geom.offset_x
+    maze_right = geom.offset_x + geom.maze_width
+    maze_bottom = geom.offset_y
+    maze_top = geom.offset_y + geom.maze_height
+
+    # Ensure icons stay outside maze box to preserve clean path entry/exit.
+    s_inside_maze = (
+        (start_left < maze_right)
+        and (start_left + icon_size > maze_left)
+        and (start_bottom < maze_top)
+        and (start_bottom + icon_size > maze_bottom)
+    )
+    e_inside_maze = (
+        (end_left < maze_right)
+        and (end_left + icon_size > maze_left)
+        and (end_bottom < maze_top)
+        and (end_bottom + icon_size > maze_bottom)
+    )
+
+    # Keep icons inside page safe content area.
+    margin = 4.0
+    in_bounds = all(
+        [
+            start_left >= layout.left - margin,
+            start_bottom >= layout.bottom - margin,
+            (start_left + icon_size) <= layout.right + margin,
+            (start_bottom + icon_size) <= layout.top + margin,
+            end_left >= layout.left - margin,
+            end_bottom >= layout.bottom - margin,
+            (end_left + icon_size) <= layout.right + margin,
+            (end_bottom + icon_size) <= layout.top + margin,
+        ]
+    )
 
     return IconPlacement(
         start_left=start_left,
@@ -331,7 +362,7 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
         end_left=end_left,
         end_bottom=end_bottom,
         size=icon_size,
-        valid=(not overlap) and (not start_over_maze) and (not end_over_maze),
+        valid=(not overlap) and (not s_inside_maze) and (not e_inside_maze) and in_bounds,
     )
 
 
@@ -355,17 +386,15 @@ def _draw_maze(
         region_h=layout.maze_region_h,
     )
 
-    # Validation checks for geometry-driven alignment.
     center_x = geom.offset_x + (geom.maze_width / 2)
     center_y = geom.offset_y + (geom.maze_height / 2)
     if abs(center_x - (PAGE_W / 2)) > PAGE_W * 0.06 or abs(center_y - (PAGE_H / 2)) > PAGE_H * 0.10:
-        print("Warning: maze center drift detected; auto-centering has been applied.")
+        raise ValueError("Maze geometry failed centering constraints.")
 
-    maze_line_width = min(2.4, max(1.8, geom.cell_size * 0.14))
-    outer_line_width = maze_line_width
-    line_color = colors.HexColor("#111111")
+    maze_line_width = min(1.8, max(1.2, geom.cell_size * 0.10))
+    outer_line_width = min(3.0, max(2.5, geom.cell_size * 0.20))
 
-    c.setStrokeColor(line_color)
+    c.setStrokeColor(colors.HexColor("#1F2937"))
     c.setLineWidth(maze_line_width)
     for rc in maze.active_cells:
         x0, y0, x1, y1 = cell_box(rc, geom)
@@ -379,107 +408,102 @@ def _draw_maze(
         if w["E"]:
             c.line(x1, y0, x1, y1)
 
-    # Draw a clean outer silhouette pass for masked edges.
-    c.setLineWidth(outer_line_width)
+    outer_segments: list[tuple[float, float, float, float]] = []
     for rc in maze.active_cells:
+        r, cc = rc
         x0, y0, x1, y1 = cell_box(rc, geom)
-        r, col = rc
-        if (r - 1, col) not in maze.active_cells:
-            c.line(x0, y1, x1, y1)
-        if (r + 1, col) not in maze.active_cells:
-            c.line(x0, y0, x1, y0)
-        if (r, col - 1) not in maze.active_cells:
-            c.line(x0, y0, x0, y1)
-        if (r, col + 1) not in maze.active_cells:
-            c.line(x1, y0, x1, y1)
+        for side, (dr, dc), seg in [
+            ("N", (-1, 0), (x0, y1, x1, y1)),
+            ("S", (1, 0), (x0, y0, x1, y0)),
+            ("W", (0, -1), (x0, y0, x0, y1)),
+            ("E", (0, 1), (x1, y0, x1, y1)),
+        ]:
+            nb = (r + dr, cc + dc)
+            if nb in maze.active_cells:
+                continue
+            if rc == maze.start and side == maze.start_open_side:
+                continue
+            if rc == maze.end and side == maze.end_open_side:
+                continue
+            outer_segments.append(seg)
+
+    icon_place = _resolve_icon_placement(maze, layout, geom, icon_scale)
+    start_left, start_bottom = icon_place.start_left, icon_place.start_bottom
+    end_left, end_bottom = icon_place.end_left, icon_place.end_bottom
+    shared_size = icon_place.size
+
+    # Final validation guards.
+    if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
+        raise ValueError("Maze geometry escaped reserved vertical zone.")
+    if not icon_place.valid:
+        raise ValueError("Icon placement invalid (overlap or side conflict).")
+
+    _draw_icon(c, str(pair.start_path), start_left + (shared_size / 2), start_bottom + (shared_size / 2), shared_size, shared_size)
+    _draw_icon(c, str(pair.finish_path), end_left + (shared_size / 2), end_bottom + (shared_size / 2), shared_size, shared_size)
+
+    # Cover pass: hide icon edge under frame so icon looks tucked into maze side.
+    c.setStrokeColor(bg_color)
+    c.setLineWidth(max(outer_line_width * 6.0, shared_size * 0.20))
+    for seg in outer_segments:
+        c.line(*seg)
+
+    # Draw maze outline after icons so icon sides appear tucked under the border.
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(outer_line_width)
+    for seg in outer_segments:
+        c.line(*seg)
+
+    # Explicitly mark where to start and finish.
+    start_open_x, start_open_y = opening_point(maze.start, maze.start_open_side, geom)
+    end_open_x, end_open_y = opening_point(maze.end, maze.end_open_side, geom)
+
+    marker_r = max(6.0, geom.cell_size * 0.18)
+    c.setFillColor(colors.HexColor("#16A34A"))
+    c.setStrokeColor(colors.white)
+    c.setLineWidth(1.2)
+    c.circle(start_open_x, start_open_y, marker_r, stroke=1, fill=1)
+    c.setFillColor(colors.HexColor("#B91C1C"))
+    c.circle(end_open_x, end_open_y, marker_r, stroke=1, fill=1)
+
+    c.setFillColor(colors.HexColor("#065F46"))
+    c.setFont("Helvetica-Bold", 8)
+    c.drawCentredString(start_open_x, start_open_y + marker_r + 3.5, "START")
+    c.setFillColor(colors.HexColor("#7F1D1D"))
+    c.drawCentredString(end_open_x, end_open_y + marker_r + 3.5, "FINISH")
 
     if show_solution and path:
         c.setStrokeColor(colors.HexColor("#DC2626"))
-        c.setLineWidth(max(2.0, maze_line_width))
+        c.setLineWidth(max(2.0, geom.cell_size * 0.20))
         pts = []
-        sx, sy = opening_point(maze.start, maze.start_open_side, geom)
-        ex, ey = opening_point(maze.end, maze.end_open_side, geom)
-        pts.append((sx, sy))
-        for rc in path:
-            x0, y0, x1, y1 = cell_box(rc, geom)
-            pts.append(((x0 + x1) / 2, (y0 + y1) / 2))
-        pts.append((ex, ey))
-        p = c.beginPath()
-        p.moveTo(*pts[0])
-        for x, y in pts[1:]:
-            p.lineTo(x, y)
-        c.drawPath(p, stroke=1, fill=0)
-
-    placement = _resolve_icon_placement(maze, layout, geom, icon_scale)
-    s_reader = _prepare_icon_reader(str(pair.start_path))
-    e_reader = _prepare_icon_reader(str(pair.finish_path))
-
-    if not placement.valid:
-        # fallback: corner anchors away from maze box
-        size = placement.size
-        margin = 6.0
-        c.drawImage(
-            s_reader,
-            layout.left + margin,
-            layout.top - size - margin,
-            width=size,
-            height=size,
-            mask="auto",
-            preserveAspectRatio=True,
-            anchor="c",
-        )
-        c.drawImage(
-            e_reader,
-            layout.right - size - margin,
-            layout.bottom + margin,
-            width=size,
-            height=size,
-            mask="auto",
-            preserveAspectRatio=True,
-            anchor="c",
-        )
-        return
-
-    c.drawImage(
-        s_reader,
-        placement.start_left,
-        placement.start_bottom,
-        width=placement.size,
-        height=placement.size,
-        mask="auto",
-        preserveAspectRatio=True,
-        anchor="c",
-    )
-    c.drawImage(
-        e_reader,
-        placement.end_left,
-        placement.end_bottom,
-        width=placement.size,
-        height=placement.size,
-        mask="auto",
-        preserveAspectRatio=True,
-        anchor="c",
-    )
+        for r, cc in path:
+            if (r, cc) not in maze.active_cells:
+                continue
+            x0, y0, _, _ = cell_box((r, cc), geom)
+            pts.append((x0 + (geom.cell_size / 2), y0 + (geom.cell_size / 2)))
+        if len(pts) >= 2:
+            p = c.beginPath()
+            p.moveTo(*pts[0])
+            for px, py in pts[1:]:
+                p.lineTo(px, py)
+            c.drawPath(p, stroke=1, fill=0)
 
 
-def _unique_rng(seed: int, page_no: int, pair_key: str, diff_name: str, attempt: int) -> random.Random:
-    payload = f"{seed}|{page_no}|{pair_key}|{diff_name}|{attempt}".encode("utf-8")
-    digest = sha1(payload).digest()
-    value = int.from_bytes(digest[:8], "big")
-    return random.Random(value)
+def _unique_rng(seed: int, page_no: int, key: str, diff: str, attempt: int) -> random.Random:
+    digest = sha1(f"{seed}|{page_no}|{key}|{diff}|{attempt}".encode("utf-8")).digest()
+    return random.Random(int.from_bytes(digest[:8], "big"))
 
 
-def _corner_bias_pair(page_idx: int, pair: IconPair) -> tuple[str, str]:
-    cyc = [("tl", "br"), ("tr", "bl"), ("bl", "tr"), ("br", "tl")]
-    return cyc[page_idx % len(cyc)]
+def _corner_bias_pair(idx: int, pair: IconPair) -> tuple[str, str]:
+    cycle = [("tl", "br"), ("tr", "bl"), ("bl", "tr"), ("br", "tl")]
+    return cycle[idx % len(cycle)]
 
 
 def build_book(
     output_file: str,
     pages: int,
-    seed: int = 42,
-    title: str = "Maze Puzzle Book",
-    icon_dir: str = "assets/icons",
+    seed: int,
+    title: str,
+    icon_dir: str,
     difficulty_profiles: dict[str, dict[str, Any]] | None = None,
     icon_scale: float = 0.20,
     anchor_cycle: list[list[str]] | None = None,
@@ -488,12 +512,10 @@ def build_book(
     c = canvas.Canvas(output_file, pagesize=A4)
     layout = _layout()
 
-    pairs = load_icon_pairs(icon_dir)
-    if not pairs:
-        raise ValueError("No icon pairs found")
-
-    puzzle_pairs = _icon_plan(pages, pairs, seed)
-    bg_order = _palette_cycle(max(8, pages * 2 + 6), rng)
+    all_pairs = load_icon_pairs(icon_dir)
+    pairs = _icon_plan(pages, all_pairs, seed)
+    profiles = difficulty_profiles or DEFAULT_DIFFICULTY_PROFILES
+    bg_order = _palette_cycle(pages + 8, rng)
 
     # Cover
     _draw_cover(c, bg_order[0], layout)
@@ -507,17 +529,17 @@ def build_book(
 
     puzzles: list[PuzzlePage] = []
     seen_signatures: set[str] = set()
-    profiles = difficulty_profiles or DEFAULT_DIFFICULTY_PROFILES
 
-    for idx, pair in enumerate(puzzle_pairs):
+    for idx, pair in enumerate(pairs):
         page_no = idx + 3
         diff_name, rows, cols, diff_factor = _difficulty_for_page(idx, pages, profiles)
 
-        maze = None
-        solution = None
-        sig = None
+        maze: Maze | None = None
+        solution: list[tuple[int, int]] | None = None
+        sig: str | None = None
 
-        for attempt in range(20):
+        # Attempt with profile dimensions first.
+        for attempt in range(40):
             prng = _unique_rng(seed, page_no, pair.key, diff_name, attempt)
             start_anchor, end_anchor = _corner_bias_pair(idx, pair)
             candidate = generate_maze(
@@ -530,15 +552,15 @@ def build_book(
                 end_anchor=end_anchor,
             )
             candidate.difficulty = diff_name
-            candidate_path = solve_maze(candidate)
-            if not candidate_path:
+            candidate_solution = solve_maze(candidate)
+            if not candidate_solution:
                 continue
 
-            sig = maze_signature(candidate)
-            if sig in seen_signatures:
+            candidate_sig = maze_signature(candidate)
+            if candidate_sig in seen_signatures:
                 continue
 
-            geom = compute_maze_geometry(
+            candidate_geom = compute_maze_geometry(
                 candidate,
                 page_width=PAGE_W,
                 page_height=PAGE_H,
@@ -547,23 +569,24 @@ def build_book(
                 region_w=layout.maze_region_w,
                 region_h=layout.maze_region_h,
             )
-            placement = _resolve_icon_placement(candidate, layout, geom, icon_scale)
+            placement = _resolve_icon_placement(candidate, layout, candidate_geom, icon_scale)
             if not placement.valid:
                 continue
 
             maze = candidate
-            solution = candidate_path
+            solution = candidate_solution
+            sig = candidate_sig
             break
 
+        # Rescue fallback dimensions if needed.
         if maze is None:
-            # Rescue strategy over alternate sizes/attempts.
             rescue_profiles = [
                 (max(12, rows - 2), max(12, cols - 2)),
                 (max(10, rows - 4), max(10, cols - 4)),
                 (rows, cols),
             ]
             for rescue_rows, rescue_cols in rescue_profiles:
-                for backup_attempt in range(60):
+                for backup_attempt in range(80):
                     prng = _unique_rng(seed, page_no, pair.key, diff_name, backup_attempt)
                     start_anchor, end_anchor = _corner_bias_pair(idx, pair)
                     candidate = generate_maze(
@@ -608,6 +631,7 @@ def build_book(
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
+    # Solutions title page
     solution_title_page = pages + 3
     _draw_page_frame(c, bg_order[solution_title_page - 1], layout)
     c.setFillColor(colors.HexColor("#0F172A"))
@@ -616,6 +640,7 @@ def build_book(
     _draw_bottom_page_no(c, solution_title_page)
     c.showPage()
 
+    # Solution pages
     for i, puzzle in enumerate(puzzles, start=1):
         page_no = solution_title_page + i
         _draw_page_frame(c, bg_order[(solution_title_page + i - 1) % len(bg_order)], layout)
@@ -633,6 +658,7 @@ def build_book(
         _draw_bottom_page_no(c, page_no)
         c.showPage()
 
+    # Final congratulation page
     final_page_no = solution_title_page + len(puzzles) + 1
     _draw_page_frame(c, bg_order[(final_page_no - 1) % len(bg_order)], layout)
     c.setFillColor(colors.HexColor("#0F172A"))
