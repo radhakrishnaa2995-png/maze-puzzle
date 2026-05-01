@@ -1,5 +1,3 @@
-# NOTE: This file is long. I am giving the exact updated full file below.
-
 # pdf_builder.py
 """Publication-ready scene maze puzzle book PDF builder."""
 
@@ -195,6 +193,7 @@ def _shape_cycle(total: int, rng: random.Random) -> list[str]:
 def _draw_page_frame(c: canvas.Canvas, bg: colors.Color, layout: Layout) -> None:
     c.setFillColor(bg)
     c.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+    # Intentionally no page border for a clean full-bleed worksheet look.
 
 
 def _draw_bottom_page_no(c: canvas.Canvas, page_no: int) -> None:
@@ -290,10 +289,8 @@ def _prepare_icon_reader(path: str) -> ImageReader:
     rgb = arr[:, :, :3].astype(np.int16)
     alpha = arr[:, :, 3].astype(np.uint8)
 
-    near_white = (rgb[:, :, 0] >= 242) & (rgb[:, :, 1] >= 242) & (rgb[:, :, 2] >= 242)
+    near_white = (rgb[:, :, 0] >= 250) & (rgb[:, :, 1] >= 250) & (rgb[:, :, 2] >= 250)
     alpha[near_white] = 0
-    edge = (rgb[:, :, 0] >= 228) & (rgb[:, :, 1] >= 228) & (rgb[:, :, 2] >= 228) & (~near_white)
-    alpha[edge] = np.minimum(alpha[edge], 120)
 
     arr[:, :, 3] = alpha
     cleaned = Image.fromarray(arr, mode="RGBA")
@@ -321,11 +318,13 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
 
     margin = 10.0
     gap = 5.0
+    # Keep all icons strictly below story text to avoid overlap.
     max_icon_top = min(layout.story_y - 6.0, PAGE_H - margin)
     min_icon_bottom = margin
     min_x = margin
     max_x = PAGE_W - margin
 
+    # Fixed large icon size (same on every page).
     fixed_icon_size = PAGE_W * 0.18
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
@@ -342,8 +341,10 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
     e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
     if not (s_fit and e_fit):
+        # Strict rule: same icon size everywhere; reject candidate if it doesn't fit.
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
+    # Reject center-ish side placements; require corner-biased positions.
     quarter_y_low = PAGE_H * 0.30
     quarter_y_high = PAGE_H * 0.70
     quarter_x_low = PAGE_W * 0.30
@@ -357,6 +358,7 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
     if exit_side in {"N", "S"} and (quarter_x_low <= end_open_x <= quarter_x_high):
         return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
+    # Disallow icon overlap; both icons must exist distinctly.
     overlap = not (
         (s_left + shared_size + 2.0) <= e_left
         or (e_left + shared_size + 2.0) <= s_left
@@ -436,6 +438,7 @@ def _draw_maze(
     end_left, end_bottom = icon_place.end_left, icon_place.end_bottom
     shared_size = icon_place.size
 
+    # Final validation guards.
     if geom.offset_y + geom.maze_height > layout.maze_top or geom.offset_y < layout.maze_bottom:
         raise ValueError("Maze geometry escaped reserved vertical zone.")
     if not icon_place.valid:
@@ -444,11 +447,13 @@ def _draw_maze(
     _draw_icon(c, str(pair.start_path), start_left + (shared_size / 2), start_bottom + (shared_size / 2), shared_size, shared_size)
     _draw_icon(c, str(pair.finish_path), end_left + (shared_size / 2), end_bottom + (shared_size / 2), shared_size, shared_size)
 
+    # Cover pass: hide icon edge under frame so icon looks tucked into maze side.
     c.setStrokeColor(bg_color)
     c.setLineWidth(max(outer_line_width * 6.0, shared_size * 0.20))
     for seg in outer_segments:
         c.line(*seg)
 
+    # Draw maze outline after icons so icon sides appear tucked under the border.
     c.setStrokeColor(wall_color)
     c.setLineWidth(outer_line_width)
     for seg in outer_segments:
