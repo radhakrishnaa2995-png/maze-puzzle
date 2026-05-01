@@ -52,46 +52,23 @@ def _neighbors(cell: Cell, rows: int, cols: int) -> List[tuple[str, Cell]]:
     return out
 
 
-def _allowed_mask(rows: int, cols: int, rng: random.Random, profile: str) -> Set[Cell]:
-    """Create large masks with light edge carving so mazes stay page-dominant yet unique."""
-    allowed: Set[Cell] = {(r, c) for r in range(rows) for c in range(cols)}
-
-    # Edge bays vary silhouette without shrinking maze occupancy too much.
-    bay_count = {"easy": 2, "medium": 3, "hard": 4}.get(profile, 3)
-    for _ in range(bay_count):
-        side = rng.choice(["N", "S", "W", "E"])
-        depth = rng.randint(1, max(2, rows // 10 if side in {"N", "S"} else cols // 10))
-        span = rng.randint(max(3, cols // 8 if side in {"N", "S"} else rows // 8), max(4, cols // 4 if side in {"N", "S"} else rows // 4))
-
-        if side in {"N", "S"}:
-            start_c = rng.randint(1, max(1, cols - span - 1))
-            rr = range(0, depth) if side == "N" else range(rows - depth, rows)
-            for r in rr:
-                for c in range(start_c, min(cols - 1, start_c + span)):
-                    allowed.discard((r, c))
-        else:
-            start_r = rng.randint(1, max(1, rows - span - 1))
-            cc = range(0, depth) if side == "W" else range(cols - depth, cols)
-            for c in cc:
-                for r in range(start_r, min(rows - 1, start_r + span)):
-                    allowed.discard((r, c))
-
-    return allowed
-
-
 def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str, forced_shape: str | None = None) -> Set[Cell]:
-    """Generate noticeably different puzzle silhouettes."""
     cy = (rows - 1) / 2.0
     cx = (cols - 1) / 2.0
     ry = max(1.0, rows * 0.46)
     rx = max(1.0, cols * 0.46)
-    shapes = ["square", "rectangle", "diamond", "hexagon", "circle", "triangle", "octagon", "cross", "pentagon", "kite", "trapezoid", "parallelogram", "rhombus", "ellipse", "arrow"]
+
+    shapes = [
+        "square", "rectangle", "diamond", "hexagon", "circle", "triangle",
+        "octagon", "cross", "pentagon", "kite", "trapezoid",
+        "parallelogram", "rhombus", "ellipse", "arrow"
+    ]
     global _LAST_SHAPE
     candidates = [sh for sh in shapes if sh != _LAST_SHAPE] or shapes
     shape = forced_shape if forced_shape in shapes else rng.choice(candidates)
     _LAST_SHAPE = shape
-    allowed: Set[Cell] = set()
 
+    allowed: Set[Cell] = set()
     for r in range(rows):
         for c in range(cols):
             yn = (r - cy) / ry
@@ -108,7 +85,6 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str, 
             elif shape == "hexagon":
                 inside = abs(xn) <= 0.90 and abs(yn) <= 0.86 and (abs(xn) * 0.58 + abs(yn)) <= 1.0
             elif shape == "triangle":
-                # Upward-facing triangle: broad base at bottom, apex at top.
                 inside = yn >= -0.9 and yn <= 0.9 and abs(xn) <= ((yn + 0.9) / 1.8) * 0.95
             elif shape == "octagon":
                 inside = abs(xn) <= 0.92 and abs(yn) <= 0.92 and (abs(xn) + abs(yn)) <= 1.40
@@ -134,28 +110,6 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str, 
             if inside:
                 allowed.add((r, c))
 
-    # Keep silhouettes organic.
-    carve_count = {"easy": 2, "medium": 3, "hard": 4}.get(profile, 3)
-    for _ in range(carve_count):
-        side = rng.choice(["N", "S", "W", "E"])
-        depth = rng.randint(1, max(2, rows // 12 if side in {"N", "S"} else cols // 12))
-        span = rng.randint(
-            max(3, cols // 10 if side in {"N", "S"} else rows // 10),
-            max(4, cols // 4 if side in {"N", "S"} else rows // 4),
-        )
-        if side in {"N", "S"}:
-            start_c = rng.randint(1, max(1, cols - span - 1))
-            rr = range(0, depth) if side == "N" else range(rows - depth, rows)
-            for r in rr:
-                for c in range(start_c, min(cols - 1, start_c + span)):
-                    allowed.discard((r, c))
-        else:
-            start_r = rng.randint(1, max(1, rows - span - 1))
-            cc = range(0, depth) if side == "W" else range(cols - depth, cols)
-            for c in cc:
-                for r in range(start_r, min(rows - 1, start_r + span)):
-                    allowed.discard((r, c))
-
     return allowed
 
 
@@ -169,60 +123,12 @@ def _boundary_sides(cell: Cell, active: Set[Cell], rows: int, cols: int) -> List
     return sides
 
 
-def _active_bounds(active: Set[Cell]) -> tuple[int, int, int, int]:
-    rows = [r for r, _ in active]
-    cols = [c for _, c in active]
-    return min(rows), max(rows), min(cols), max(cols)
-
-
-def _pick_opening(active: Set[Cell], rows: int, cols: int, target: tuple[int, int], preferred: tuple[str, str]) -> tuple[Cell, str]:
-    tr, tc = target
-    candidates: list[tuple[int, Cell, List[str]]] = []
-    for cell in active:
-        sides = _boundary_sides(cell, active, rows, cols)
-        if not sides:
-            continue
-        dist = abs(cell[0] - tr) + abs(cell[1] - tc)
-        candidates.append((dist, cell, sides))
-
-    candidates.sort(key=lambda x: x[0])
-    for _dist, cell, sides in candidates:
-        for pref in preferred:
-            if pref in sides:
-                return cell, pref
-    if candidates:
-        return candidates[0][1], candidates[0][2][0]
-
-    any_cell = next(iter(active))
-    return any_cell, "W"
-
-
-def _pick_opening_on_side(active: Set[Cell], rows: int, cols: int, side: str, target_row: int) -> tuple[Cell, str]:
-    candidates: list[tuple[int, Cell]] = []
-    min_row, max_row, min_col, max_col = _active_bounds(active)
-    for cell in active:
-        r, c = cell
-        if side == "W" and c != min_col:
-            continue
-        if side == "E" and c != max_col:
-            continue
-        if side == "N" and r != min_row:
-            continue
-        if side == "S" and r != max_row:
-            continue
-        sides = _boundary_sides(cell, active, rows, cols)
-        if side in sides:
-            candidates.append((abs(cell[0] - target_row), cell))
-    if candidates:
-        candidates.sort(key=lambda x: x[0])
-        return candidates[0][1], side
-    # Fallback should be rare; preserve validity with closest boundary opening.
-    pref = (side, "W", "E", "N", "S")
-    return _pick_opening(active, rows, cols, (target_row, cols // 2), pref)
-
-
 def _pick_corner_opening(active: Set[Cell], rows: int, cols: int, corner: str) -> tuple[Cell, str]:
-    min_row, max_row, min_col, max_col = _active_bounds(active)
+    min_row = min(r for r, _ in active)
+    max_row = max(r for r, _ in active)
+    min_col = min(c for _, c in active)
+    max_col = max(c for _, c in active)
+
     corner_specs = {
         "tl": ((min_row, min_col), ("N", "W")),
         "tr": ((min_row, max_col), ("N", "E")),
@@ -230,50 +136,33 @@ def _pick_corner_opening(active: Set[Cell], rows: int, cols: int, corner: str) -
         "br": ((max_row, max_col), ("S", "E")),
     }
     target, preferred = corner_specs[corner]
+
     candidates: list[tuple[int, Cell, List[str]]] = []
     for cell in active:
-        r, c = cell
-        if corner == "tl" and not (r == min_row or c == min_col):
-            continue
-        if corner == "tr" and not (r == min_row or c == max_col):
-            continue
-        if corner == "bl" and not (r == max_row or c == min_col):
-            continue
-        if corner == "br" and not (r == max_row or c == max_col):
-            continue
         sides = _boundary_sides(cell, active, rows, cols)
         if not sides:
             continue
-        dist = abs(r - target[0]) + abs(c - target[1])
+        dist = abs(cell[0] - target[0]) + abs(cell[1] - target[1])
         candidates.append((dist, cell, sides))
 
     candidates.sort(key=lambda x: x[0])
-    for _dist, cell, sides in candidates:
+    for _, cell, sides in candidates:
         for pref in preferred:
             if pref in sides:
                 return cell, pref
-    if candidates:
-        return candidates[0][1], candidates[0][2][0]
-    return _pick_opening(active, rows, cols, target, preferred)
+    return candidates[0][1], candidates[0][2][0]
 
 
-def _carve_masked_dfs(
-    rows: int,
-    cols: int,
-    active: Set[Cell],
-    walls: Dict[Cell, Dict[str, bool]],
-    start: Cell,
-    rng: random.Random,
-    straight_preference: float,
-) -> None:
+def _carve_masked_dfs(rows: int, cols: int, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], start: Cell, rng: random.Random) -> None:
     visited: Set[Cell] = {start}
     stack: list[Cell] = [start]
-    prev_dir: dict[Cell, str] = {}
 
     while stack:
         cur = stack[-1]
         options: list[tuple[str, Cell]] = []
-        for side, nxt in _neighbors(cur, rows, cols):
+        r, c = cur
+        for side, (dr, dc) in DIRS.items():
+            nxt = (r + dr, c + dc)
             if nxt in active and nxt not in visited:
                 options.append((side, nxt))
 
@@ -281,201 +170,44 @@ def _carve_masked_dfs(
             stack.pop()
             continue
 
-        if rng.random() < straight_preference and cur in prev_dir:
-            straight = [opt for opt in options if opt[0] == prev_dir[cur]]
-            side, nxt = rng.choice(straight or options)
-        else:
-            side, nxt = rng.choice(options)
-
+        side, nxt = rng.choice(options)
         walls[cur][side] = False
         walls[nxt][OPPOSITE[side]] = False
-        prev_dir[nxt] = side
         visited.add(nxt)
         stack.append(nxt)
 
 
-def _carve_prim(
-    rows: int,
-    cols: int,
-    active: Set[Cell],
-    walls: Dict[Cell, Dict[str, bool]],
-    start: Cell,
-    rng: random.Random,
-    branch_bias: float,
-) -> None:
-    visited: Set[Cell] = {start}
-    frontier: list[tuple[Cell, str, Cell]] = []
-    for side, nxt in _neighbors(start, rows, cols):
-        if nxt in active:
-            frontier.append((start, side, nxt))
-
-    while frontier:
-        idx = 0 if (rng.random() < branch_bias) else rng.randrange(len(frontier))
-        cur, side, nxt = frontier.pop(idx)
-        if nxt in visited:
-            continue
-
-        walls[cur][side] = False
-        walls[nxt][OPPOSITE[side]] = False
-        visited.add(nxt)
-
-        for nside, nn in _neighbors(nxt, rows, cols):
-            if nn in active and nn not in visited:
-                frontier.append((nxt, nside, nn))
-
-
-def _add_loops(active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int, rng: random.Random, loop_factor: float) -> None:
-    candidates: list[tuple[Cell, str, Cell]] = []
-    for cell in active:
-        for side, nxt in _neighbors(cell, rows, cols):
-            if nxt not in active:
-                continue
-            if walls[cell][side]:
-                rev = (nxt, OPPOSITE[side], cell)
-                if rev not in candidates:
-                    candidates.append((cell, side, nxt))
-
-    rng.shuffle(candidates)
-    open_count = int(len(candidates) * loop_factor)
-    for cell, side, nxt in candidates[:open_count]:
-        walls[cell][side] = False
-        walls[nxt][OPPOSITE[side]] = False
-
-
-def _path_exists(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> bool:
+def _force_connect(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> None:
     seen: Set[Cell] = {start}
     stack: list[Cell] = [start]
     while stack:
         cur = stack.pop()
         if cur == end:
-            return True
-        for side, nxt in _neighbors(cur, rows, cols):
-            if nxt not in active or nxt in seen:
-                continue
-            if walls[cur][side]:
+            return
+        r, c = cur
+        for side, (dr, dc) in DIRS.items():
+            nxt = (r + dr, c + dc)
+            if nxt not in active or nxt in seen or walls[cur][side]:
                 continue
             seen.add(nxt)
             stack.append(nxt)
-    return False
-
-
-def _force_connect(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> None:
-    """Guarantee entry->exit connectivity by carving a direct rescue tunnel when needed."""
-    if _path_exists(start, end, active, walls, rows, cols):
-        return
 
     cur = start
-    guard = 0
-    while cur != end and guard < (rows * cols * 3):
-        guard += 1
+    while cur != end:
         r, c = cur
         er, ec = end
         options: list[tuple[str, Cell, int]] = []
-        for side, nxt in _neighbors(cur, rows, cols):
+        for side, (dr, dc) in DIRS.items():
+            nxt = (r + dr, c + dc)
             if nxt not in active:
                 continue
             dist = abs(nxt[0] - er) + abs(nxt[1] - ec)
             options.append((side, nxt, dist))
-        if not options:
-            break
         options.sort(key=lambda x: x[2])
         side, nxt, _ = options[0]
         walls[cur][side] = False
         walls[nxt][OPPOSITE[side]] = False
         cur = nxt
-
-
-def _carve_kruskal(
-    rows: int,
-    cols: int,
-    active: Set[Cell],
-    walls: Dict[Cell, Dict[str, bool]],
-    rng: random.Random,
-) -> None:
-    parent: Dict[Cell, Cell] = {cell: cell for cell in active}
-    rank: Dict[Cell, int] = {cell: 0 for cell in active}
-
-    def find(x: Cell) -> Cell:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: Cell, b: Cell) -> bool:
-        ra, rb = find(a), find(b)
-        if ra == rb:
-            return False
-        if rank[ra] < rank[rb]:
-            parent[ra] = rb
-        elif rank[ra] > rank[rb]:
-            parent[rb] = ra
-        else:
-            parent[rb] = ra
-            rank[ra] += 1
-        return True
-
-    edges: list[tuple[Cell, str, Cell]] = []
-    for cell in active:
-        for side, nxt in _neighbors(cell, rows, cols):
-            if nxt not in active:
-                continue
-            if cell < nxt:
-                edges.append((cell, side, nxt))
-
-    rng.shuffle(edges)
-    for cell, side, nxt in edges:
-        if union(cell, nxt):
-            walls[cell][side] = False
-            walls[nxt][OPPOSITE[side]] = False
-
-
-def _path_cells(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> list[Cell]:
-    from collections import deque
-    q = deque([start])
-    prev: dict[Cell, Cell | None] = {start: None}
-    while q:
-        cur = q.popleft()
-        if cur == end:
-            break
-        for side, nxt in _neighbors(cur, rows, cols):
-            if nxt not in active or nxt in prev:
-                continue
-            if walls[cur][side]:
-                continue
-            prev[nxt] = cur
-            q.append(nxt)
-    if end not in prev:
-        return [start, end]
-    path: list[Cell] = []
-    cur: Cell | None = end
-    while cur is not None:
-        path.append(cur)
-        cur = prev[cur]
-    path.reverse()
-    return path
-
-
-def _enforce_single_corridor(start: Cell, end: Cell, active: Set[Cell], walls: Dict[Cell, Dict[str, bool]], rows: int, cols: int) -> None:
-    path = _path_cells(start, end, active, walls, rows, cols)
-    path_set = set(path)
-    active.clear()
-    active.update(path_set)
-    # Block every side by default for corridor cells only.
-    for cell in list(walls.keys()):
-        if cell in path_set:
-            walls[cell] = {"N": True, "S": True, "W": True, "E": True}
-        else:
-            walls.pop(cell, None)
-    # Open only the corridor edges along the chosen path.
-    for a, b in zip(path, path[1:]):
-        ar, ac = a
-        br, bc = b
-        dr, dc = br - ar, bc - ac
-        side = next((k for k, v in DIRS.items() if v == (dr, dc)), None)
-        if side is None:
-            continue
-        walls[a][side] = False
-        walls[b][OPPOSITE[side]] = False
 
 
 def maze_signature(maze: Maze) -> str:
@@ -496,83 +228,24 @@ def generate_maze(
     end_anchor: str = "br",
     forced_shape: str | None = None,
 ) -> Maze:
-    # Difficulty tuning focused on visual differentiation.
     if difficulty_factor <= 0.30:
-        profile = "easy"
         rows = max(12, min(rows + rng.randint(-1, 1), 16))
         cols = max(12, min(cols + rng.randint(-1, 1), 16))
-        straight_pref = 0.72
-        loop_factor = 0.18
-        branch_bias = 0.75
     elif difficulty_factor <= 0.75:
-        profile = "medium"
         rows = max(18, min(rows + rng.randint(-1, 2), 26))
         cols = max(20, min(cols + rng.randint(-1, 2), 30))
-        straight_pref = 0.44
-        loop_factor = 0.10
-        branch_bias = 0.48
     else:
-        profile = "hard"
         rows = max(28, min(rows + rng.randint(0, 3), 36))
         cols = max(32, min(cols + rng.randint(0, 4), 44))
-        straight_pref = 0.18
-        loop_factor = 0.04
-        branch_bias = 0.25
 
-    # Use geometric silhouette masks by default for clearer requested shape variety.
-    active = _shape_allowed_mask(rows, cols, rng, profile, forced_shape=forced_shape)
+    active = _shape_allowed_mask(rows, cols, rng, "any", forced_shape=forced_shape)
     walls: Dict[Cell, Dict[str, bool]] = {cell: {"N": True, "S": True, "W": True, "E": True} for cell in active}
 
-    # Architecture rule: choose entry/exit from intended image flow first.
-    anchor_side = {
-        "left": "W",
-        "right": "E",
-        "top": "N",
-        "bottom": "S",
-        "tl": "N",
-        "tr": "N",
-        "bl": "S",
-        "br": "S",
-        "l": "W",
-        "r": "E",
-        "t": "N",
-        "b": "S",
-    }
-    start_key = start_anchor.lower()
-    end_key = end_anchor.lower()
-    if start_key in {"tl", "tr", "bl", "br"}:
-        start, start_side = _pick_corner_opening(active, rows, cols, start_key)
-    else:
-        start_side_pref = anchor_side.get(start_key, "W")
-        start, start_side = _pick_opening_on_side(active, rows, cols, start_side_pref, target_row=rows // 2)
+    start, start_side = _pick_corner_opening(active, rows, cols, start_anchor.lower() if start_anchor in {"tl", "tr", "bl", "br"} else "tl")
+    end, end_side = _pick_corner_opening(active, rows, cols, end_anchor.lower() if end_anchor in {"tl", "tr", "bl", "br"} else "br")
 
-    if end_key in {"tl", "tr", "bl", "br"}:
-        end, end_side = _pick_corner_opening(active, rows, cols, end_key)
-    else:
-        end_side_pref = anchor_side.get(end_key, "E")
-        end, end_side = _pick_opening_on_side(active, rows, cols, end_side_pref, target_row=rows // 2)
-
-    if end_side == start_side:
-        alternative = "E" if start_side != "E" else "W"
-        end, end_side = _pick_opening_on_side(active, rows, cols, alternative, target_row=rows // 2)
-
-    if profile == "hard":
-        algorithm = rng.choice(["kruskal", "prim", "dfs"])
-    elif profile == "medium":
-        algorithm = rng.choice(["dfs", "prim", "kruskal", "biased"])
-    else:
-        algorithm = rng.choice(["dfs", "prim", "biased"])
-    if algorithm == "prim":
-        _carve_prim(rows, cols, active, walls, start, rng, branch_bias=branch_bias)
-    elif algorithm == "kruskal":
-        _carve_kruskal(rows, cols, active, walls, rng)
-    elif algorithm == "biased":
-        _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=max(0.10, straight_pref * 0.72))
-    else:
-        _carve_masked_dfs(rows, cols, active, walls, start, rng, straight_preference=straight_pref)
-    # Keep a single-solution maze (tree): do not add extra loops.
+    _carve_masked_dfs(rows, cols, active, walls, start, rng)
     _force_connect(start, end, active, walls, rows, cols)
-    _enforce_single_corridor(start, end, active, walls, rows, cols)
 
     walls[start][start_side] = False
     walls[end][end_side] = False
