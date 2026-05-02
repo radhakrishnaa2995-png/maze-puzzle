@@ -35,14 +35,11 @@ def format_difficulty_label(marker):
 def draw_page_background(canvas, doc):
     canvas.saveState()
 
-    # Light blue KDP-friendly page background
-    canvas.setFillColor(PAGE_BG)
-    canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], stroke=0, fill=1)
-
     # Dark border around page edges
     inset = 10
     canvas.setStrokeColor(PAGE_BORDER)
     canvas.setLineWidth(1.2)
+    canvas.setLineJoin(1)
     canvas.rect(inset, inset, doc.pagesize[0] - 2 * inset, doc.pagesize[1] - 2 * inset, stroke=1, fill=0)
 
     canvas.restoreState()
@@ -60,7 +57,7 @@ def draw_grid(data, size=32, hide_zero=False):
     table = Table(grid_data, colWidths=size, rowHeights=size)
 
     style = [
-        ('GRID', (0, 0), (-1, -1), 0.6, colors.black),
+        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
         ('BOX', (0, 0), (-1, -1), 2.0, colors.black),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
