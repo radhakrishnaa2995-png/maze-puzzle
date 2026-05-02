@@ -57,7 +57,7 @@ def draw_grid(data, size=32, hide_zero=False):
     table = Table(grid_data, colWidths=size, rowHeights=size)
 
     style = [
-        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
+        ('INNERGRID', (0, 0), (-1, -1), 0.8, colors.black),
         ('BOX', (0, 0), (-1, -1), 2.0, colors.black),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
