@@ -78,8 +78,8 @@ def calculate_remaining_space(entry: Box, exitb: Box) -> Box:
     return Box(left, bottom, right - left, top - bottom)
 
 
-def get_maze_shape(rng: random.Random) -> str:
-    return rng.choice(["rectangle","square","zigzag","spiral","wave","s_shape","circular"])
+def random_shape(rng: random.Random) -> str:
+    return rng.choice(["rectangle", "square", "zigzag", "spiral", "wave"])
 
 
 def difficulty_for_page(i: int, total: int) -> str:
@@ -113,12 +113,6 @@ def shape_cells(rows: int, cols: int, shape: str) -> set[tuple[int, int]]:
                 keep = (d % 2 == 0) or (r == rows // 2)
             elif shape == "wave":
                 keep = abs((r - rows / 2) - 2.4 * np.sin(c / 1.9)) < rows * 0.42
-            elif shape == "s_shape":
-                keep = abs((r - rows / 2) - 2.8 * np.sin(c / 2.2)) < rows * 0.28
-            elif shape == "circular":
-                cy, cx = rows / 2.0, cols / 2.0
-                d = ((r - cy) ** 2 + (c - cx) ** 2) ** 0.5
-                keep = (rows * 0.18) <= d <= (rows * 0.48)
             if keep:
                 cells.add((r, c))
     return cells
@@ -169,42 +163,6 @@ def create_main_path(start: tuple[int, int], end: tuple[int, int], rows: int, co
         path.append(cur)
         cur = prev[cur]
     return list(reversed(path))
-
-
-def shape_guided_path(shape: str, rows: int, cols: int, active: set[tuple[int, int]], start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
-    if shape == "zigzag":
-        p = []
-        for c in range(cols):
-            rr = range(1, rows - 1) if c % 2 == 0 else range(rows - 2, 0, -1)
-            for r in rr:
-                if (r, c) in active:
-                    p.append((r, c))
-        return [start] + [x for x in p if x not in {start, end}] + [end]
-    if shape == "s_shape":
-        p = []
-        for c in range(cols):
-            yc = (rows * 0.5) + (rows * 0.28 * np.sin((c / max(1, cols - 1)) * np.pi * 2))
-            r = int(max(1, min(rows - 2, yc)))
-            if (r, c) in active:
-                p.append((r, c))
-        return [start] + [x for x in p if x not in {start, end}] + [end]
-    if shape == "circular":
-        cy, cx = rows / 2.0, cols / 2.0
-        p = []
-        for t in np.linspace(0.0, 2.3 * np.pi, num=max(32, cols * 3)):
-            rad = min(rows, cols) * (0.45 - 0.25 * (t / (2.3 * np.pi)))
-            r = int(round(cy + np.sin(t) * rad))
-            c = int(round(cx + np.cos(t) * rad))
-            if (r, c) in active:
-                p.append((r, c))
-        uniq = []
-        seen = set()
-        for cell in p:
-            if cell not in seen:
-                uniq.append(cell)
-                seen.add(cell)
-        return [start] + [x for x in uniq if x not in {start, end}] + [end]
-    return []
 
 
 def add_dead_ends(path: list[tuple[int, int]], active: set[tuple[int, int]], rows: int, cols: int, level: str, rng: random.Random) -> set[tuple[int, int]]:
@@ -274,15 +232,13 @@ def generate_maze_page(c: canvas.Canvas, pair: IconPair, page_idx: int, total_pa
     area = calculate_remaining_space(entry, exitb)
 
     rows, cols = grid_size_for_difficulty(level)
-    shape = get_maze_shape(rng)
+    shape = random_shape(rng)
     active = shape_cells(rows, cols, shape)
 
     start = get_cell_near(entry, area, rows, cols, "left", active)
     end = get_cell_near(exitb, area, rows, cols, "right", active)
 
-    path = shape_guided_path(shape, rows, cols, active, start, end)
-    if len(path) < 2:
-        path = create_main_path(start, end, rows, cols, active, rng)
+    path = create_main_path(start, end, rows, cols, active, rng)
     keep = add_dead_ends(path, active, rows, cols, level, rng)
     walls = build_walls(active, rows, cols, keep, path)
 
