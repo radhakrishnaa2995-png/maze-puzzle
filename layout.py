@@ -36,9 +36,9 @@ def draw_page_background(canvas, doc):
     canvas.saveState()
 
     # Dark border around page edges
-    inset = 10
+    inset = 0
     canvas.setStrokeColor(PAGE_BORDER)
-    canvas.setLineWidth(1.2)
+    canvas.setLineWidth(0.8)
     canvas.setLineJoin(1)
     canvas.rect(inset, inset, doc.pagesize[0] - 2 * inset, doc.pagesize[1] - 2 * inset, stroke=1, fill=0)
 
@@ -76,7 +76,7 @@ def draw_grid(data, size=32, hide_zero=False):
 def puzzle_block(puzzle_index, puzzle, star):
     difficulty_text = format_difficulty_label(star)
     title = Paragraph(f"Puzzle {puzzle_index}    {difficulty_text}", puzzle_title_style)
-    grid = draw_grid(puzzle, size=32, hide_zero=True)
+    grid = draw_grid(puzzle, size=30, hide_zero=True)
 
     block = Table([[title], [grid]], colWidths=[288])
     block.setStyle(TableStyle([
