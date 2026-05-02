@@ -28,8 +28,8 @@ PAD_X = 0.06
 PAD_Y = 0.08
 HEADER_H_PX = 110.0
 BOTTOM_MARGIN_PX = 50.0
-MAZE_TARGET_W_RATIO = 0.88
-MAZE_TARGET_H_RATIO = 0.80
+MAZE_TARGET_W_RATIO = 0.92
+MAZE_TARGET_H_RATIO = 0.84
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -293,7 +293,7 @@ def _prepare_icon_reader(path: str) -> ImageReader:
     # Two-stage mask:
     # 1) flood-fill connected white-ish border pixels
     # 2) globally remove very bright, low-saturation pixels (common flat white backdrop)
-    near_white = (rgb[:, :, 0] >= 244) & (rgb[:, :, 1] >= 244) & (rgb[:, :, 2] >= 244) & (alpha > 0)
+    near_white = (rgb[:, :, 0] >= 236) & (rgb[:, :, 1] >= 236) & (rgb[:, :, 2] >= 236) & (alpha > 0)
     h, w = near_white.shape
     bg = np.zeros((h, w), dtype=bool)
     stack = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
@@ -309,7 +309,7 @@ def _prepare_icon_reader(path: str) -> ImageReader:
     maxc = rgb.max(axis=2)
     minc = rgb.min(axis=2)
     low_sat = (maxc - minc) <= 9
-    bright = (rgb[:, :, 0] >= 248) & (rgb[:, :, 1] >= 248) & (rgb[:, :, 2] >= 248)
+    bright = (rgb[:, :, 0] >= 238) & (rgb[:, :, 1] >= 238) & (rgb[:, :, 2] >= 238)
     flat_white = low_sat & bright & (alpha > 0)
 
     alpha[bg | flat_white] = 0
@@ -347,9 +347,9 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
 
     # Derive icon size from maze cell size/scale, then clamp to safe print bounds.
     # This avoids clipping on pages with tighter text/maze geometry while still staying bold.
-    min_icon_size = max(32.0, geom.cell_size * 1.9)
-    max_icon_size = min(PAGE_W * 0.16, geom.cell_size * 3.5)
-    desired_icon_size = max(min_icon_size, min(max_icon_size, geom.cell_size * max(1.8, icon_scale * 8.0)))
+    min_icon_size = max(64.0, geom.cell_size * 2.4)
+    max_icon_size = min(PAGE_W * 0.22, geom.cell_size * 4.6)
+    desired_icon_size = max(min_icon_size, min(max_icon_size, geom.cell_size * max(2.2, icon_scale * 10.0)))
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
         factor = 0.5 + (gap / size)
@@ -361,25 +361,31 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
         fits = left >= min_x and right <= max_x and bottom >= min_icon_bottom and top <= max_icon_top
         return left, bottom, fits
 
+    # Anchor icons to opposite page corners first, then let maze fill remaining space visually.
     shared_size = desired_icon_size
-    s_left, s_bottom, s_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, shared_size)
-    e_left, e_bottom, e_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, shared_size)
+    s_left = min_x + 4.0
+    s_bottom = max_icon_top - shared_size
+    e_left = max_x - shared_size - 4.0
+    e_bottom = min_icon_bottom + 4.0
+    s_fit = s_left >= min_x and s_bottom >= min_icon_bottom
+    e_fit = (e_left + shared_size) <= max_x and (e_bottom + shared_size) <= max_icon_top
     if not (s_fit and e_fit):
-        # Shrink progressively to preserve visibility while guaranteeing fit.
-        for factor in (0.92, 0.84, 0.76, 0.68):
+        for factor in (0.92, 0.84, 0.76):
             trial_size = shared_size * factor
-            if trial_size < 24.0:
-                break
-            ts_left, ts_bottom, ts_fit = aligned_box_for_size(start_open_x, start_open_y, entry_side, trial_size)
-            te_left, te_bottom, te_fit = aligned_box_for_size(end_open_x, end_open_y, exit_side, trial_size)
+            ts_left = min_x + 4.0
+            ts_bottom = max_icon_top - trial_size
+            te_left = max_x - trial_size - 4.0
+            te_bottom = min_icon_bottom + 4.0
+            ts_fit = ts_left >= min_x and ts_bottom >= min_icon_bottom
+            te_fit = (te_left + trial_size) <= max_x and (te_bottom + trial_size) <= max_icon_top
             if ts_fit and te_fit:
                 shared_size = trial_size
                 s_left, s_bottom = ts_left, ts_bottom
                 e_left, e_bottom = te_left, te_bottom
                 s_fit = e_fit = True
                 break
-        if not (s_fit and e_fit):
-            return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
+    if not (s_fit and e_fit):
+        return IconPlacement(0.0, 0.0, 0.0, 0.0, shared_size, False)
 
     # Reject center-ish side placements; require corner-biased positions.
     quarter_y_low = PAGE_H * 0.30
