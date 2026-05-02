@@ -28,8 +28,8 @@ PAD_X = 0.06
 PAD_Y = 0.08
 HEADER_H_PX = 110.0
 BOTTOM_MARGIN_PX = 50.0
-MAZE_TARGET_W_RATIO = 0.80
-MAZE_TARGET_H_RATIO = 0.76
+MAZE_TARGET_W_RATIO = 0.88
+MAZE_TARGET_H_RATIO = 0.80
 
 PASTEL_PALETTE = [
     colors.HexColor("#DBEAFE"),
@@ -289,7 +289,11 @@ def _prepare_icon_reader(path: str) -> ImageReader:
     rgb = arr[:, :, :3].astype(np.int16)
     alpha = arr[:, :, 3].astype(np.uint8)
 
-    near_white = (rgb[:, :, 0] >= 248) & (rgb[:, :, 1] >= 248) & (rgb[:, :, 2] >= 248) & (alpha > 0)
+    # Remove plain/near-white backgrounds aggressively while preserving colored artwork.
+    # Two-stage mask:
+    # 1) flood-fill connected white-ish border pixels
+    # 2) globally remove very bright, low-saturation pixels (common flat white backdrop)
+    near_white = (rgb[:, :, 0] >= 244) & (rgb[:, :, 1] >= 244) & (rgb[:, :, 2] >= 244) & (alpha > 0)
     h, w = near_white.shape
     bg = np.zeros((h, w), dtype=bool)
     stack = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
@@ -302,7 +306,13 @@ def _prepare_icon_reader(path: str) -> ImageReader:
         bg[y, x] = True
         stack.extend([(y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)])
 
-    alpha[bg] = 0
+    maxc = rgb.max(axis=2)
+    minc = rgb.min(axis=2)
+    low_sat = (maxc - minc) <= 9
+    bright = (rgb[:, :, 0] >= 248) & (rgb[:, :, 1] >= 248) & (rgb[:, :, 2] >= 248)
+    flat_white = low_sat & bright & (alpha > 0)
+
+    alpha[bg | flat_white] = 0
     arr[:, :, 3] = alpha
     cleaned = Image.fromarray(arr, mode="RGBA")
     buf = BytesIO()
@@ -337,8 +347,8 @@ def _resolve_icon_placement(maze: Maze, layout: Layout, geom, icon_scale: float)
 
     # Derive icon size from maze cell size/scale, then clamp to safe print bounds.
     # This avoids clipping on pages with tighter text/maze geometry while still staying bold.
-    min_icon_size = max(28.0, geom.cell_size * 1.7)
-    max_icon_size = min(PAGE_W * 0.13, geom.cell_size * 3.2)
+    min_icon_size = max(32.0, geom.cell_size * 1.9)
+    max_icon_size = min(PAGE_W * 0.16, geom.cell_size * 3.5)
     desired_icon_size = max(min_icon_size, min(max_icon_size, geom.cell_size * max(1.8, icon_scale * 8.0)))
 
     def aligned_box_for_size(open_x: float, open_y: float, side: str, size: float) -> tuple[float, float, bool]:
