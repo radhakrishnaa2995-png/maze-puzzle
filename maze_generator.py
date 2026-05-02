@@ -107,7 +107,7 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str, 
             if inside:
                 allowed.add((r, c))
 
-    # Keep silhouettes organic.
+    # Keep silhouettes organic with edge notches.
     carve_count = {"easy": 2, "medium": 3, "hard": 4}.get(profile, 3)
     for _ in range(carve_count):
         side = rng.choice(["N", "S", "W", "E"])
@@ -127,6 +127,20 @@ def _shape_allowed_mask(rows: int, cols: int, rng: random.Random, profile: str, 
             cc = range(0, depth) if side == "W" else range(cols - depth, cols)
             for c in cc:
                 for r in range(start_r, min(rows - 1, start_r + span)):
+                    allowed.discard((r, c))
+
+    # Add interior blocked pockets so the maze has more meaningful dead zones.
+    pocket_count = {"easy": 1, "medium": 2, "hard": 3}.get(profile, 2)
+    for _ in range(pocket_count):
+        if len(allowed) < 60:
+            break
+        center_r = rng.randint(max(2, rows // 6), min(rows - 3, (rows * 5) // 6))
+        center_c = rng.randint(max(2, cols // 6), min(cols - 3, (cols * 5) // 6))
+        pr = rng.randint(1, max(1, rows // 14))
+        pc = rng.randint(1, max(1, cols // 14))
+        for r in range(max(1, center_r - pr), min(rows - 1, center_r + pr + 1)):
+            for c in range(max(1, center_c - pc), min(cols - 1, center_c + pc + 1)):
+                if abs(r - center_r) <= pr and abs(c - center_c) <= pc:
                     allowed.discard((r, c))
 
     return allowed
